@@ -1,0 +1,29 @@
+[project]
+name = "ledgerline"
+version = "0.1.0"
+description = "Document ingestion pipeline for small-business finances"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "fastapi[standard]",
+    "sqlalchemy>=2.0",
+    "alembic",
+    "pydantic>=2",
+    "pydantic-settings",
+    "python-dotenv",
+    "anthropic",
+    "httpx",
+]
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "ruff",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
