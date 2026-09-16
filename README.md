@@ -6,7 +6,9 @@ Upload receipts and invoices. Local OCR reads them, deterministic routing picks 
 
 The design principle: **models only where perception or judgment is required.** Everything else is code that can be unit-tested and never hallucinates.
 
-> Status: **planning / phase 1**. Results table and demo will land here once the eval harness exists.
+> Status: **phase 1 in progress**. Settings, DB session layer and the phase-1 schema are in;
+> upload endpoint, worker and OCR container are next. The results table and demo land here
+> once the eval harness exists (phase 3).
 
 ## Why this exists
 
@@ -111,6 +113,7 @@ erDiagram
     DOCUMENTS ||--o| OCR_RESULTS : has
     DOCUMENTS ||--o{ EXTRACTIONS : has
     DOCUMENTS ||--o{ DOCUMENT_EVENTS : logs
+    DOCUMENTS ||--o{ JOBS : enqueues
     EXTRACTIONS ||--o| RECEIPTS : maps_to
     EXTRACTIONS ||--o| INVOICES : maps_to
     RECEIPTS ||--o{ LINE_ITEMS : contains
@@ -124,15 +127,41 @@ erDiagram
         string sha256 UK
         string storage_key
         string mime_type
+        string original_filename
+        int size_bytes
         string status
         datetime uploaded_at
     }
     OCR_RESULTS {
+        uuid id PK
         uuid document_id FK
+        string engine
+        string engine_version
+        json params
         text full_text
         json layout_blocks
-        string engine
         float mean_confidence
+        datetime created_at
+    }
+    DOCUMENT_EVENTS {
+        uuid id PK
+        uuid document_id FK
+        string from_status
+        string to_status
+        json detail
+        datetime created_at
+    }
+    JOBS {
+        uuid id PK
+        string kind
+        uuid document_id FK
+        string status
+        int attempts
+        int max_attempts
+        datetime run_after
+        string locked_by
+        datetime locked_at
+        text last_error
     }
     EXTRACTIONS {
         uuid id PK
@@ -172,6 +201,10 @@ erDiagram
     }
 ```
 
+`documents`, `ocr_results`, `document_events` and `jobs` exist today (phase 1). The typed and
+canonical tables — `receipts`, `invoices`, `line_items`, `transactions`, `outbox` — land in
+phase 2 and phase 8. `jobs` is the queue: a worker claims a row, so there is no broker to run.
+
 ## Document type registry
 
 Adding a document type means adding one module. Nothing else in the pipeline changes.
@@ -207,9 +240,10 @@ Phase 3 comes before phase 5 deliberately: the eval harness exists before the mu
 
 ## Stack
 
-- **API:** Python, FastAPI, SQLAlchemy, Alembic
-- **DB:** SQLite (dev) → Postgres
-- **Queue:** DB-backed job table polled by a worker (Redis later if needed)
+- **API:** Python 3.12, FastAPI, SQLAlchemy 2.0, Alembic
+- **Tooling:** uv for dependencies and virtualenv, ruff for lint and format, pytest
+- **DB:** SQLite (dev, WAL mode) → Postgres
+- **Queue:** DB-backed `jobs` table polled by a worker (Redis later if needed)
 - **OCR:** self-hosted, behind an `OcrEngine` protocol, in its own container (PaddleOCR or successor — under evaluation)
 - **Models:** Anthropic API behind a `ChatProvider` protocol; cheap tier for extraction, strong tier for fallback and analysis
 - **Orchestration:** LangGraph (phase 5+)
@@ -226,16 +260,25 @@ Phase 3 comes before phase 5 deliberately: the eval harness exists before the mu
 
 ## Local development
 
+Requires [uv](https://docs.astral.sh/uv/) and Python 3.12.
+
 ```bash
 git clone <this repo>
-cd <repo>
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env        # add ANTHROPIC_API_KEY
-uvicorn api.main:app --reload
-# docs at http://127.0.0.1:8000/docs
+cd ledgerline
+uv sync                            # creates .venv, installs from uv.lock
+cp .env.example .env               # ANTHROPIC_API_KEY is only needed from phase 2 on
+uv run alembic upgrade head        # creates ./data/ledgerline.db
+uv run uvicorn api.main:app --reload
+# docs at http://127.0.0.1:8000/docs, health check at /health
 ```
 
-Full `docker compose up` instructions land with phase 1.
+Lint and tests:
+
+```bash
+uv run ruff check .
+uv run pytest
+```
+
+Full `docker compose up` instructions land with the OCR container, later in phase 1.
 
 ---
