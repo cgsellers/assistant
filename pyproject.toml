@@ -31,7 +31,15 @@ select = ["E", "F", "I", "UP", "B"]
 [tool.ruff.lint.flake8-bugbear]
 # `def handler(session: Session = Depends(get_session))` is the documented
 # FastAPI dependency-injection idiom, not the mutable-default bug B008 targets.
-extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Path", "fastapi.Body"]
+extend-immutable-calls = [
+    "fastapi.Depends",
+    "fastapi.Query",
+    "fastapi.Path",
+    "fastapi.Body",
+    "fastapi.File",
+    "fastapi.Form",
+    "fastapi.Header",
+]
 
 [tool.ruff.lint.per-file-ignores]
 # Migrations are generated. The long lines are Alembic's own constraint names;
