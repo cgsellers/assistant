@@ -22,6 +22,7 @@ from sqlalchemy import (
     MetaData,
     String,
     Text,
+    TypeDecorator,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -40,6 +41,38 @@ NAMING_CONVENTION = {
     "fk": "fk_%(table_name)s_%(column_0_N_name)s_%(referred_table_name)s",
     "pk": "pk_%(table_name)s",
 }
+
+
+class UTCDateTime(TypeDecorator):
+    """
+    A DateTime that always round-trips as timezone-aware UTC.
+
+    SQLite has no datetime type: it stores whatever string it is handed and
+    returns it naive, dropping the offset. That breaks two things at once --
+    comparing the result to an aware datetime raises TypeError, and letting
+    SQLAlchemy send an aware value makes SQLite do a *string* comparison
+    against naive rows.
+
+    So: convert to UTC on the way in, tag as UTC on the way out. Postgres has
+    a real timestamptz, so there we leave the value aware and let the database
+    do the work.
+    """
+
+    impl = DateTime
+    cache_ok = True
+
+    def process_bind_param(self, value: datetime | None, dialect) -> datetime | None:
+        if value is None:
+            return None
+        # A naive value here is assumed UTC rather than rejected -- utcnow()
+        # always returns aware, so this only catches values from elsewhere.
+        value = value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+        return value.replace(tzinfo=None) if dialect.name == "sqlite" else value
+
+    def process_result_value(self, value: datetime | None, dialect) -> datetime | None:
+        if value is None:
+            return None
+        return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
 
 
 def new_id() -> str:
@@ -79,7 +112,7 @@ class Document(Base):
         String(32), index=True, default=DocStatus.UPLOADED
     )
     uploaded_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow
+        UTCDateTime, default=utcnow
     )
 
     ocr_result: Mapped[OcrResult | None] = relationship(
@@ -113,7 +146,7 @@ class OcrResult(Base):
     layout_blocks: Mapped[list] = mapped_column(JSON)
     mean_confidence: Mapped[float | None] = mapped_column(Float)  # null for VLMs
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow
+        UTCDateTime, default=utcnow
     )
 
     document: Mapped[Document] = relationship(back_populates="ocr_result")
@@ -131,7 +164,7 @@ class DocumentEvent(Base):
     to_status: Mapped[str] = mapped_column(String(32))
     detail: Mapped[dict | None] = mapped_column(JSON)  # error text, timings, ...
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow
+        UTCDateTime, default=utcnow
     )
 
     document: Mapped[Document] = relationship(back_populates="events")
@@ -158,13 +191,13 @@ class Job(Base):
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     max_attempts: Mapped[int] = mapped_column(Integer, default=3)
     run_after: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow
+        UTCDateTime, default=utcnow
     )
     locked_by: Mapped[str | None] = mapped_column(String(100))  # worker id
-    locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    locked_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     last_error: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow
+        UTCDateTime, default=utcnow
     )
 
 
