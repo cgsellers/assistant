@@ -12,7 +12,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from core import storage
-from core.models import Document, DocumentEvent, Job
+from core.models import Document, DocumentEvent, Job, OcrResult
 from core.status import DocStatus
 
 
@@ -22,6 +22,10 @@ def find_by_sha256(session: Session, digest: str) -> Document | None:
 
 def get_document(session: Session, document_id: str) -> Document | None:
     return session.get(Document, document_id)
+
+
+def get_ocr_result(session: Session, document_id: str) -> OcrResult | None:
+    return session.scalar(select(OcrResult).where(OcrResult.document_id == document_id))
 
 
 def ingest(

@@ -45,6 +45,27 @@ class DocumentOut(BaseModel):
     duplicate: bool = False
 
 
+class OcrResultOut(BaseModel):
+    """
+    Stored OCR output for a document.
+
+    `layout_blocks` is omitted by default -- a dense invoice produces hundreds
+    of entries and drowns the response when all you wanted was the text.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    engine: str
+    engine_version: str | None
+    params: dict | None
+    full_text: str
+    mean_confidence: float | None
+    created_at: datetime
+
+    block_count: int = 0
+    layout_blocks: list | None = None
+
+
 class DocumentDetail(DocumentOut):
     """A document plus its audit trail."""
 

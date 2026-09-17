@@ -5,10 +5,10 @@ from __future__ import annotations
 import binascii
 from base64 import b64decode
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from sqlalchemy.orm import Session
 
-from api.schemas import Base64Upload, DocumentDetail, DocumentOut
+from api.schemas import Base64Upload, DocumentDetail, DocumentOut, OcrResultOut
 from core import repository, storage
 from core.config import get_settings
 from core.db import get_session
@@ -83,6 +83,41 @@ def upload_base64(
             status.HTTP_400_BAD_REQUEST, f"content_b64 is not valid base64: {exc}"
         ) from exc
     return _ingest(session, data, payload.filename)
+
+
+@router.get(
+    "/{document_id}/ocr",
+    response_model=OcrResultOut,
+    summary="Get the OCR text for a document",
+)
+def get_ocr(
+    document_id: str,
+    include_blocks: bool = Query(
+        default=False, description="Include every text block with its bounding box"
+    ),
+    session: Session = Depends(get_session),
+) -> OcrResultOut:
+    """
+    The recognised text, the engine that produced it, and the confidence.
+
+    Returns 404 with distinct messages for "no such document" and "OCR has not
+    run yet", because those need different actions from the caller.
+    """
+    document = repository.get_document(session, document_id)
+    if document is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No such document")
+
+    result = repository.get_ocr_result(session, document_id)
+    if result is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            f"No OCR result yet; document status is {document.status!r}",
+        )
+
+    out = OcrResultOut.model_validate(result)
+    out.block_count = len(result.layout_blocks or [])
+    out.layout_blocks = result.layout_blocks if include_blocks else None
+    return out
 
 
 @router.get("/{document_id}", response_model=DocumentDetail, summary="Get a document")

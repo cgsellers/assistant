@@ -298,9 +298,29 @@ Two reasons it is not the choice:
    document; that number would be set by the most expensive component, running on
    everything.
 
-**Chosen: PaddleOCR.** A classical detect-then-recognise pipeline. Runs on CPU at
-practical speed, returns bounding boxes *and per-word confidence scores*, and
-PP-StructureV3 adds layout and table analysis.
+**Chosen: the PP-OCR models, run on ONNX Runtime.** A classical
+detect-then-recognise pipeline. Runs on CPU at practical speed, returns bounding boxes
+*and per-word confidence scores*.
+
+A second hardware constraint forced a refinement here. **PaddlePaddle publishes no
+`linux_aarch64` wheel** — only `manylinux1_x86_64`, `macosx_11_0_arm64`, and
+`win_amd64`. The development machine is ARM and a container is Linux, so that
+combination does not exist. Two options remained:
+
+1. Force the container to `linux/amd64` and run the official wheel under emulation.
+   Verified that amd64 emulation works on this Docker, but PaddlePaddle's x86 wheels
+   expect AVX, which Rosetta does not emulate — likely slow QEMU fallback or an
+   outright crash, plus a ~2.5 GB image.
+2. Run the same PP-OCR detection and recognition models exported to ONNX, via
+   `rapidocr` (a pure-Python wrapper) on `onnxruntime`, which *does* ship ARM Linux
+   wheels.
+
+**Option 2 was chosen.** Native speed, ~400 MB image, and identical outputs — bounding
+boxes and per-word confidences. The models are the same; only the runtime differs.
+
+**The honest claim is therefore "PP-OCR models on ONNX Runtime", not "PaddleOCR".** The
+engine reports itself as `ppocr-onnx`, and `EngineType` in the wrapper does expose a
+`paddle` backend should the official runtime ever become viable on this hardware.
 
 The confidence signal is worth more here than its raw accuracy: it is a free,
 deterministic input to escalation logic. A VLM generates tokens and cannot supply it —
@@ -308,7 +328,18 @@ which is why `ocr_results.mean_confidence` is nullable, commented "null for VLM 
 
 The layout capability matters for phase 2. A receipt is a two-column document
 (description left, amount right). The extractor must know that `9.35` belongs to `TOTAL`
-and not to `IVA 10%`, and that association comes from bounding boxes.
+and not to `IVA 10%`, and that association comes from bounding boxes. **Verified:** PP-OCR
+returns `TOTAL` and `9.35` as two separate detections with their own boxes, where
+Tesseract flattened them into one reading-order stream.
+
+Two findings from configuring it, both worth recording:
+
+- **`lang_type: latin` raises `ValueError` for PP-OCRv6 small.** Pinning it, which
+  seemed obviously right for Spanish documents, would have crashed the container at
+  startup. The default (`ch`) model is the multilingual one and reads Spanish
+  accents and comma decimal separators correctly.
+- **Models are baked into the image**, so the container needs no network at runtime and
+  works offline.
 
 **Chosen: Tesseract as the test double.** Not a fallback — a different tool for a
 different job. No GPU, no container, no network, installed via Homebrew. It makes tests
@@ -466,17 +497,28 @@ upload → sha256 dedup → content-addressed store → job queued
 queued, base64 path, `415` on unrecognised bytes, `400` on empty file, `400` on invalid
 base64, `404` on unknown id. Stored files were re-hashed and match their own filenames.
 
-**Worker run over four documents:**
+**OCR sidecar:** the `ocr` container runs the PP-OCR models on ONNX Runtime behind a
+small FastAPI shim (`POST /ocr`, `GET /health`). It rasterises PDFs with `pypdfium2`,
+returns per-block bounding boxes, detection polygons and confidences, and reports
+readiness rather than mere liveness. Hardened: `read_only` filesystem, `cap_drop: ALL`,
+`no-new-privileges`, tmpfs scratch, no credentials, no network needed at runtime.
 
-| File | Status | Result |
+**Worker run over four documents, both engines:**
+
+| File | Tesseract | PP-OCR on ONNX |
 |---|---|---|
-| `receipt.png` (1×1 px) | `ocr_done` | 0 blocks — nothing to read |
-| `b64.png` (1×1 px) | `ocr_done` | 0 blocks |
-| `IC MAYO 2026.pdf` | `ocr_failed` | Permanent: Tesseract cannot rasterise PDFs |
-| `cafe-luna.png` | `ocr_done` | **28 blocks, mean confidence 0.865, 140 chars** |
+| `receipt.png` (1×1 px) | `ocr_done`, 0 blocks | `ocr_done`, 0 blocks |
+| `b64.png` (1×1 px) | `ocr_done`, 0 blocks | `ocr_done`, 0 blocks |
+| `IC MAYO 2026.pdf` | **`ocr_failed`** — cannot rasterise | **`ocr_done`, 23 blocks, conf 0.955**, 7.7s at 200 DPI |
+| `cafe-luna.png` | `ocr_done`, 28 blocks, conf 0.865 | `ocr_done`, 14 blocks, **conf 0.999** |
 
-The PDF failure is correct behaviour, not a gap: recorded with a reason, job marked
-`failed` rather than retrying, document at `ocr_failed`.
+Under Tesseract the PDF failure was *correct* behaviour rather than a gap — recorded with
+a reason, job `failed` rather than retrying, document at `ocr_failed`. The container
+removes the limitation rather than the error handling.
+
+Re-running the same documents through a second engine required deleting the existing
+`ocr_results` rows, because of the `UNIQUE(document_id)` constraint. That is exactly the
+constraint phase 3 relaxes to `(document_id, engine)` — see 5.8.
 
 ### 7.2 Measured baseline: Tesseract
 
@@ -490,9 +532,29 @@ returned 28 blocks at mean confidence 0.865, but misread the amounts:
 It also flattened the two-column layout into reading order, detaching amounts from their
 labels.
 
-This is a real measurement and it is the baseline phase 3 must beat. It also directly
-supports 5.12: on a finance document these are precisely the errors that must not reach
-the ledger.
+PP-OCR on ONNX Runtime, same image, read **every amount correctly** at 0.999 mean
+confidence:
+
+| Field | Tesseract | PP-OCR on ONNX |
+|---|---|---|
+| `5.00` | `-00` | `5.00` |
+| `8.50` | `-50` | `8.50` |
+| `9.35` | `35` | `9.35` |
+| Mean confidence | 0.865 | **0.999** |
+| Column structure | flattened to reading order | preserved as separate boxes |
+
+On a Spanish receipt it also handled accents (`PANADERÍA`, `rústica`, `Málaga`) and
+comma decimal separators (`1,20`, `3,60`), missing only one accent (`Andalucía` →
+`Andalucia`).
+
+These are real measurements on *synthetic* images, not photographs, and they are a
+baseline rather than an eval — phase 3 replaces them with per-field accuracy on a labeled
+set. They directly support 5.12: on a finance document, Tesseract's errors are precisely
+the ones that must not reach the ledger.
+
+**On the real PDF**, printed text read cleanly while **handwritten** fields degraded
+badly (a handwritten date read as `19105/2026`). Handwriting is a separate problem and is
+not currently in scope.
 
 ### 7.3 Repository state
 
@@ -511,8 +573,9 @@ Migration 72a33d10bc7d (head) · alembic check: no drift · ruff: clean
 [x] POST /documents, POST /documents/base64, GET /documents/{id}
 [x] OcrEngine protocol + Tesseract test double
 [x] worker: claim, retry/backoff, stale reclamation
-[ ] PaddleOCR container + HTTP shim
-[ ] docker-compose.yml
+[x] OCR container (PP-OCR on ONNX Runtime) + HTTP shim
+[x] docker-compose.yml
+[x] PDF support via pypdfium2 rasterisation
 ```
 
 ---
@@ -543,11 +606,13 @@ correct the README, or drop the unique constraint so repeats create rows marked
 `duplicate`. Current preference is to drop the status, since the audit trail belongs in
 `document_events`.
 
-**8.4 No PDF support in the default dev path.** By design — Tesseract has no rasteriser
-and should not guess. PaddleOCR handles PDFs. `pypdfium2` would be a pure-wheel option if
-PDF support in the test double ever becomes necessary.
+**8.4 ~~No PDF support~~ — resolved.** The OCR container rasterises PDFs with
+`pypdfium2` at 200 DPI, capped at 20 pages. Tesseract still refuses PDFs by design, since
+it has no rasteriser and should not guess; that path is now only used for tests.
 
-**8.5 No Docker Compose yet.** Lands with the PaddleOCR container.
+**8.5 ~~No Docker Compose~~ — partially resolved.** `docker-compose.yml` runs the OCR
+sidecar. The API and worker are still run with `uv run` so `--reload` and breakpoints
+work; they join compose when there is a deployment target to match.
 
 **8.6 Content-level deduplication is unsolved.** `sha256` catches "you sent me this exact
 file again." It does not catch "this is the same receipt." A user who photographs a

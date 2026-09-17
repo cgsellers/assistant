@@ -248,7 +248,7 @@ Phase 3 comes before phase 5 deliberately: the eval harness exists before the mu
 - **Tooling:** uv for dependencies and virtualenv, ruff for lint and format, pytest
 - **DB:** SQLite (dev, WAL mode) → Postgres
 - **Queue:** DB-backed `jobs` table polled by a worker (Redis later if needed)
-- **OCR:** self-hosted, behind an `OcrEngine` protocol, in its own container (PaddleOCR or successor — under evaluation)
+- **OCR:** self-hosted, behind an `OcrEngine` protocol, in its own container (PP-OCR models on ONNX Runtime; Tesseract as test double)
 - **Models:** Anthropic API behind a `ChatProvider` protocol; cheap tier for extraction, strong tier for fallback and analysis
 - **Orchestration:** LangGraph (phase 5+)
 - **Infra:** Docker Compose
