@@ -10,6 +10,10 @@ The design principle: **models only where perception or judgment is required.** 
 > upload endpoint, worker and OCR container are next. The results table and demo land here
 > once the eval harness exists (phase 3).
 
+> **[Technical design & decision record](docs/DESIGN.md)** — architecture, the full
+> decision log with rejected alternatives, measured results, deviations from the original
+> plan, and known gaps.
+
 ## Why this exists
 
 Most "AI finance assistant" projects put a model in the loop for everything and can't tell you how accurate they are or what a document costs to process. This project is built the other way round:
