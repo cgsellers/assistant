@@ -24,8 +24,8 @@ from core import storage
 from core.db import SessionLocal
 from core.models import Document, DocumentEvent, Job, OcrResult, utcnow
 from core.status import DocStatus, JobStatus
+from ocr import get_engine
 from ocr.base import OcrEngine, OcrError, UnsupportedMediaType
-from ocr.tesseract import TesseractEngine
 
 log = logging.getLogger("worker")
 
@@ -217,12 +217,15 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Ledgerline job worker")
     parser.add_argument("--once", action="store_true", help="drain the queue and exit")
     parser.add_argument("--poll", type=float, default=POLL_SECONDS)
+    parser.add_argument(
+        "--engine", default=None, help="override the configured OCR engine"
+    )
     args = parser.parse_args()
 
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(levelname)-7s %(name)s %(message)s"
     )
-    engine = TesseractEngine()
+    engine = get_engine(args.engine)
     log.info("worker %s starting with engine=%s", worker_id(), engine.name)
 
     while True:

@@ -35,6 +35,10 @@ class TextBlock:
     bbox: tuple[int, int, int, int]  # x0, y0, x1, y1 in pixels, origin top-left
     confidence: float | None = None  # 0.0-1.0; None for engines that don't report it
     page: int = 1
+    # Detection outline, when the engine provides one. PP-OCR returns
+    # quadrilaterals, which keep the rotation of skewed text that `bbox`
+    # discards; Tesseract only reports rectangles and leaves this None.
+    polygon: tuple[tuple[float, float], ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -57,6 +61,7 @@ class OcrOutput:
                 "bbox": list(b.bbox),
                 "confidence": b.confidence,
                 "page": b.page,
+                **({"polygon": [list(p) for p in b.polygon]} if b.polygon else {}),
             }
             for b in self.blocks
         ]
