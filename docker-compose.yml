@@ -1,0 +1,42 @@
+# Development compose. Only the OCR sidecar runs here; the API and worker are
+# run directly with `uv run` so that --reload works and breakpoints are usable.
+# They join this file when there is a deployment target to match.
+
+services:
+  ocr:
+    build: ./services/ocr_service
+    image: ledgerline-ocr:dev
+    container_name: ledgerline-ocr
+    ports:
+      # Matches ocr_service_url in core/config.py
+      - "127.0.0.1:8001:8001"
+    environment:
+      OCR_DPI: "200"
+      OCR_MAX_PAGES: "20"
+
+    # --- Hardening ---
+    # This is the process that parses files uploaded by strangers, so it gets
+    # the least authority that still lets it work. It holds no credentials and
+    # never touches the database. The OCR models are baked into the image, so
+    # it needs no network access of its own either.
+    read_only: true          # nothing may modify the filesystem
+    tmpfs:
+      - /tmp                 # ...except scratch space, which is in RAM
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+    healthcheck:
+      # Reports whether the models are actually loaded, not merely that the
+      # process is up -- see the /health handler in app.py.
+      test: ["CMD", "python", "-c",
+             "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8001/health').status==200 else 1)"]
+      interval: 15s
+      timeout: 5s
+      # Generous: the models take a few seconds to load on a cold start, and
+      # failing the healthcheck during startup would restart-loop the container.
+      start_period: 60s
+      retries: 3
+
+    restart: unless-stopped

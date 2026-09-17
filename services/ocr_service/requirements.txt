@@ -1,0 +1,9 @@
+# Pinned so the image rebuilds identically. RapidOCR is a pure-Python wrapper;
+# onnxruntime is the native runtime that actually executes the PP-OCR models
+# and is the reason this works on arm64 at all.
+rapidocr==3.9.2
+onnxruntime==1.30.0
+fastapi[standard]==0.141.1
+# Rasterises PDFs so this service can read them. Pure wheel with a native
+# aarch64 build, unlike the Paddle framework -- see docs/DESIGN.md 5.12.
+pypdfium2==5.13.0
