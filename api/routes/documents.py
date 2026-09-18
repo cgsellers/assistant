@@ -26,7 +26,7 @@ def _validate(data: bytes) -> str:
     if len(data) > settings.max_upload_bytes:
         limit_mb = settings.max_upload_bytes / 1024 / 1024
         raise HTTPException(
-            status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            status.HTTP_413_CONTENT_TOO_LARGE,
             f"File is {len(data) / 1024 / 1024:.1f} MB, limit is {limit_mb:.0f} MB",
         )
 
