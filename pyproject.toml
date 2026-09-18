@@ -22,6 +22,14 @@ dev = [
     "ruff",
 ]
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --strict-markers"
+markers = [
+    "needs_tesseract: requires the tesseract binary on PATH",
+    "needs_ocr_service: requires the ocr container running on :8001",
+]
+
 [tool.ruff]
 line-length = 100
 target-version = "py312"

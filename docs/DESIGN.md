@@ -559,9 +559,10 @@ not currently in scope.
 ### 7.3 Repository state
 
 ```
-11 commits · 1,320 lines of Python · working tree clean · pushed
+15 commits · ~2,000 lines of Python + 1,488 lines of tests · pushed
 Python 3.12.14 · FastAPI 0.141.1 · SQLAlchemy 2.0.52 · Pydantic 2.13.5 · Alembic 1.20.0
 Migration 72a33d10bc7d (head) · alembic check: no drift · ruff: clean
+pytest: 128 passed in 0.8s
 ```
 
 ### 7.4 Phase 1 remaining
@@ -584,11 +585,42 @@ Migration 72a33d10bc7d (head) · alembic check: no drift · ruff: clean
 
 Stated plainly. These are known, not overlooked.
 
-**8.1 No tests.** `pytest` is configured and collects zero tests. This is the most
-significant gap — the pipeline has been verified by manual scripts, which is not
-regression protection. Should be closed before the codebase grows further.
-`core/db.py` builds its engine at import time from `get_settings()`, which will need a
-small refactor to point tests at a throwaway database.
+**8.1 ~~No tests~~ — resolved.** 128 tests, 1,488 lines, running in **0.8s** with no
+container and no tesseract required.
+
+| File | Tests | Covers |
+|---|---|---|
+| `test_storage.py` | 27 | hashing, sharding, idempotent writes, magic-byte sniffing |
+| `test_ocr.py` | 30 | protocol conformance, TSV parsing, HTTP error mapping |
+| `test_api.py` | 22 | every endpoint, every validation and 4xx path |
+| `test_worker.py` | 22 | claim atomicity, backoff, stale reclamation |
+| `test_repository.py` | 13 | ingest transaction, dedup, the unique-index race |
+| `test_models.py` | 9 | `UTCDateTime` round-tripping (the bug in 5.9) |
+| `test_pipeline.py` | 5 | end to end: upload → worker → read back |
+
+Three things made this possible, and each was a design decision made earlier:
+
+- **`core/db.py` was refactored to a `create_db_engine(url)` factory.** Tests build an
+  engine against a tmp_path database and get the same pragmas as production —
+  foreign key enforcement in particular, which SQLite disables by default and which
+  would otherwise let tests pass on constraints that do not hold.
+- **`OcrEngine` being a Protocol means the worker is testable with a `FakeEngine`.** No
+  container, no binary, no network. The swappability argument from 5.12 paid off as
+  testability.
+- **Routes take their session by injection**, so `app.dependency_overrides[get_session]`
+  redirects the whole API at a sandbox database.
+
+The suite immediately earned its keep by surfacing a deprecation
+(`HTTP_413_REQUEST_ENTITY_TOO_LARGE` → `HTTP_413_CONTENT_TOO_LARGE`), now fixed.
+
+It also established something the code did not say: the `document is None` guard in
+`run_ocr_job` is unreachable while foreign keys are enforced. Constructing that orphan
+in a test requires `PRAGMA foreign_keys=OFF`. The branch is kept — SQLite disables
+foreign keys by default, so any database created without the engine factory would allow
+exactly that — and the test now documents why.
+
+Still uncovered: `main()`'s polling loop, and the OCR container's own `app.py` (tested
+by hand via the endpoint, not by pytest).
 
 **8.2 `/health` is liveness only.** It runs `SELECT 1`, which succeeds against any
 openable database — including one with zero tables. Demonstrated by rolling the migration
@@ -677,8 +709,10 @@ uvx datasette data/ledgerline.db --port 8081   # browsable UI, read-only
 Points in this project worth being able to defend, and where the reasoning lives:
 
 - **Why not put a model in every step?** §2, §5.12, §5.16
-- **How do you know it works?** §7.1, §7.2 — and honestly, §8.1: there are no automated
-  tests yet, which is the real answer
+- **How do you know it works?** §7.1, §7.2, and §8.1 — 128 tests in 0.8s, including
+  claim atomicity, retry backoff and the end-to-end pipeline
+- **How do you test something that needs a GPU container?** §8.1 — `OcrEngine` is a
+  Protocol, so a `FakeEngine` substitutes for it; the suite needs no container at all
 - **Why a database queue instead of Redis?** §5.3 — transactional claims
 - **How do you avoid double-processing?** §5.4, §5.7, §5.13
 - **What happens when a worker dies mid-job?** §5.15

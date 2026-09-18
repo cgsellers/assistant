@@ -280,7 +280,7 @@ Lint and tests:
 
 ```bash
 uv run ruff check .
-uv run pytest
+uv run pytest              # 128 tests, ~1s, no container or tesseract needed
 ```
 
 Full `docker compose up` instructions land with the OCR container, later in phase 1.
