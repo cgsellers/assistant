@@ -80,7 +80,7 @@ POST /documents
                               │
                     [phase 2] router ──> registry ──> extractor ──> validator ──> mapper
                               │
-                    typed tables ──> transactions (canonical)
+                    extractions.raw_json ──> transactions (canonical)
                               │
                     analyst agent · integrations · exports · review queue
 ```
@@ -90,9 +90,9 @@ POST /documents
 | Boundary | Why it exists |
 |---|---|
 | `OcrEngine` protocol | Engines are swappable and, critically, *comparable* — phase 3 runs several over one labeled set |
-| `ChatProvider` protocol (phase 2) | Model calls stream typed events, not strings; keeps provider choice out of business logic |
-| Document type registry (phase 2) | Adding a document type means adding one module; nothing else in the pipeline changes |
-| Three data layers | Raw is immutable evidence, typed is per-document-type, canonical is the single thing the analyst reads |
+| `Extractor` protocol (phase 2) | Keeps provider and tier choice out of business logic, so the eval harness can swap either over one labeled set and the worker never learns which model ran |
+| Document type registry (phase 2) | A document type is a row, not a module: adding one needs no deploy, and versioning is a new row — see 5.20 |
+| Three data layers | Raw is immutable evidence, typed is the extracted JSON, canonical is the single thing the analyst reads |
 
 ---
 
@@ -100,17 +100,21 @@ POST /documents
 
 Three layers, deliberately separated:
 
-- **Raw** — `documents`, `ocr_results`, `extractions`. Immutable and versioned. This is
-  the evidence trail; nothing here is ever edited in place.
-- **Typed** — `receipts`, `invoices`, `line_items`. Per-document-type shapes with their
-  own validation rules. This is what integrations map from.
+- **Raw** — `documents`, `ocr_results`. Immutable. This is the evidence trail; nothing
+  here is ever edited in place.
+- **Typed** — `extractions.raw_json`, shaped by a `document_types` row. Append-only and
+  versioned: a retry, a stronger model or an edited definition writes a new row rather
+  than overwriting, and `is_current` marks the one that counts.
 - **Canonical** — `transactions`. The only table the analyst agent reads.
 
 Plus `document_events` (audit), `jobs` (queue), `review_items`, `outbox`, and
 `runs`/`steps` for per-model-call cost tracking.
 
-**Built so far (phase 1):** `documents`, `ocr_results`, `document_events`, `jobs`.
-Everything else is phase 2 or later.
+**Built so far:** `documents`, `ocr_results`, `document_events`, `jobs` (phase 1);
+`document_types`, `extractions` (phase 2, migration applied). Everything else is later.
+
+The typed layer is JSON rather than per-document-type tables — see 5.20 for why, and
+what that costs.
 
 ### Why three layers rather than one table
 
@@ -395,15 +399,22 @@ exhausts `max_attempts` rather than looping indefinitely.
 
 ### 5.16 No code sandbox for extraction
 
-A model returning JSON through a schema-enforced tool call cannot do anything but return
-JSON. Sandboxing is reserved for two genuinely untrusted things: parsing uploaded files,
-and phase 6's model-generated parser templates.
+A model returning JSON against an enforced schema cannot do anything but return JSON.
+Sandboxing is reserved for two genuinely untrusted things: parsing uploaded files, and
+phase 6's model-generated parser templates.
+
+Implementation note: this is done with structured outputs (`output_config.format`), not a
+forced tool call. The API constrains the response to the JSON Schema directly, which is
+what smuggling the schema through a tool definition was always a workaround for. One
+fewer indirection, and no tool-call plumbing to parse back out.
 
 ### 5.17 Per-type schemas, not one universal JSON
 
 Receipts, invoices, and bank statements are different shapes with different validation
-rules and different target tables. One universal schema would be mostly-null columns and
-validation that cannot be specific enough to be useful.
+rules. One universal schema would be mostly-null fields and validation that cannot be
+specific enough to be useful.
+
+Per-type *schemas* no longer implies per-type *tables*, though — see 5.20.
 
 ### 5.18 Phase 3 before phase 5
 
@@ -416,6 +427,50 @@ README can show before/after numbers.
 The provider layer, tool registry, budgets, tracing, and evals all live *outside* the
 graph. LangGraph arrives in phase 5 for what it is genuinely good at: batch fan-out,
 conditional edges, and interrupt/resume at human review with checkpointing.
+
+### 5.20 A document type is data, not code
+
+The original design gave each document type a Python module satisfying a `DocumentType`
+protocol — `matches()`, `extraction_prompt()`, `validate()`, `map_to_rows()` — and the
+README advertised "adding a document type means adding one module."
+
+It is now a **row**. `document_types.definition` holds a JSON document — fields with
+their extraction descriptions, deterministic matchers, a validation rule list, and
+per-issuer description overrides — and one generic processor interprets all of it.
+
+**What this buys:**
+
+- **Adding a type needs no deploy.** This is the precondition for phase 6's authoring UI.
+  Under a protocol-per-type design, "let an analyst add a vendor" means "let an analyst
+  ship Python," which is a sandbox problem nobody wants to own.
+- **Versioning is nearly free.** A definition is a value, so a new version is a new row
+  and extractions produced by the old one keep their meaning. Versioning a module means
+  versioning code and keeping both importable.
+- **The format validates itself.** `Definition` is a Pydantic model, so a malformed
+  definition is rejected with a precise error at authoring time rather than failing
+  halfway through an extraction — and a rule naming a field that does not exist is caught
+  immediately instead of silently never firing on any document.
+- **Per-issuer tuning without forking the type.** A `Profile` overrides *descriptions*
+  only; it cannot add or remove fields, because the target shape belongs to the document
+  type and only the layout belongs to the issuer.
+- **The authoring UI is generated, not written.** `Definition.model_json_schema()`
+  describes the format, so the form follows from the model.
+
+**What it costs:**
+
+- **Expressiveness.** Rules are a closed vocabulary of seven types, not an expression
+  language. Deliberate: a fixed set is pickable from a dropdown and independently
+  testable, whereas an embedded expression language is a parser, a sandbox, and a
+  debugging surface. Types needing arbitrary logic get a named Python validator, which
+  keeps that escape hatch in code review rather than in the database.
+- **No per-type tables, therefore no per-type columns.** `extractions.raw_json` is the
+  typed layer. Querying JSON is worse than querying a column, and that is the trade — a
+  field is promoted to a real column only when code must act on it, which is exactly what
+  the canonical `transactions` table is.
+- **Descriptions are load-bearing prose.** The single most important string in the system
+  is a `description` field, and nothing type-checks prose. A bad description degrades
+  extraction silently. This is precisely what the phase-3 eval harness exists to catch,
+  and it is the strongest argument for building it before anything is scaled up.
 
 ---
 
@@ -471,6 +526,21 @@ Planned in the original layout. `Depends(get_session)` from `core.db` has been
 sufficient; a one-item indirection layer would be noise. Will be added when there is a
 second dependency.
 
+### 6.7 The document type registry became data
+
+The plan, and the README, specified a `DocumentType` protocol implemented once per type.
+Phase 2 replaced it with definitions stored as rows — before any type had been written
+against the protocol, so nothing was discarded. Reasoning in 5.20.
+
+Two knock-ons. The ER diagram's `receipts`, `invoices` and `line_items` tables were never
+built and are no longer planned; `extractions.raw_json` replaces them. And the planned
+`ChatProvider` protocol became `Extractor` (`llm/base.py`), narrowed to the one call
+phase 2 actually makes — extraction — rather than a general chat abstraction built ahead
+of a second caller. The analyst agent in phase 7 is that second caller, and can widen the
+boundary when it exists.
+
+The README described the rejected design until this record was updated.
+
 ---
 
 ## 7. Current progress
@@ -491,7 +561,7 @@ upload → sha256 dedup → content-addressed store → job queued
 | `POST /documents` | Multipart upload |
 | `POST /documents/base64` | JSON upload for callers holding bytes |
 | `GET /documents/{id}` | Status plus full audit trail |
-| `GET /health` | Liveness (see 7.4) |
+| `GET /health` | Liveness only — see 8.2 for what it cannot catch |
 
 **Tested behaviours:** upload, re-upload deduping to the same id with no extra job
 queued, base64 path, `415` on unrecognised bytes, `400` on empty file, `400` on invalid
@@ -559,13 +629,14 @@ not currently in scope.
 ### 7.3 Repository state
 
 ```
-15 commits · ~2,000 lines of Python + 1,488 lines of tests · pushed
+17 commits · 3,224 lines of Python + 3,217 lines of tests · phase 2 uncommitted
 Python 3.12.14 · FastAPI 0.141.1 · SQLAlchemy 2.0.52 · Pydantic 2.13.5 · Alembic 1.20.0
-Migration 72a33d10bc7d (head) · alembic check: no drift · ruff: clean
-pytest: 128 passed in 0.8s
+anthropic 1.5.0
+Migration 6823df7fd6b2 (head, applied) · alembic check: no drift · ruff: clean
+pytest: 347 passed in 1.7s (128 phase 1 · 219 phase 2)
 ```
 
-### 7.4 Phase 1 remaining
+### 7.4 Phase 1 checklist
 
 ```
 [x] settings + DB session layer
@@ -578,6 +649,80 @@ pytest: 128 passed in 0.8s
 [x] docker-compose.yml
 [x] PDF support via pypdfium2 rasterisation
 ```
+
+### 7.5 Phase 2 in progress — written, not verified
+
+1,258 lines in two new packages (`doctypes/`, `llm/`) plus two tables, uncommitted and
+not yet wired into the worker, under **219 new tests**:
+
+| Module | Provides |
+|---|---|
+| `doctypes/definition.py` | The definition format: `FieldSpec`, `Matchers`, seven rule types, `Profile`, and a `Definition` validator that rejects rules or profiles referencing fields that do not exist |
+| `doctypes/schema.py` | `build_json_schema()`, `match_score()`, `select_profile()` |
+| `doctypes/validate.py` | Coercion (money to `Decimal`, dates, nested lists) and the evaluator for all seven rule types |
+| `doctypes/registry.py` | `active_definitions()`, `route()` — loads types from the table and picks the highest scorer |
+| `core/repository.py` | `create_document_type_version()`, `get_active_document_type()`, `record_extraction()` |
+| `llm/base.py` | `Extractor` protocol; `ExtractionResult` carrying tokens, cost and latency as results rather than logs |
+| `llm/anthropic.py` | `AnthropicExtractor` via structured outputs, with a permanent/transient error split so the worker retries only what can succeed |
+| `core/models.py` | `document_types`, `extractions` — migration `6823df7fd6b2`, applied |
+
+Remaining before the phase-2 loop closes:
+
+```
+[x] rule evaluator — all seven rule types, 120 tests
+[x] coercion — money strings to Decimal, dates to date
+[x] registry — load definitions from the table; route across active types
+[x] tests for doctypes/ and llm/ — 219 of them
+[ ] worker wiring — "ocr" is still the only job kind
+[ ] a seeded `receipt` definition
+```
+
+Two correctness traps the tests pinned, both worth knowing about:
+
+- **`"1,234"` must be rejected, not normalised.** Replacing the comma with a period turns
+  1234 into 1.234 and loses three orders of magnitude silently. The money coercion
+  validates against the wire pattern *before* swapping separators, so a thousands
+  separator, a currency symbol or a third decimal is reported rather than guessed at.
+- **Four `anthropic` exception families escaped `extract()` uncaught** and reached the
+  worker with no retryable/permanent classification: `APIResponseValidationError` (an
+  `APIError`, not an `APIStatusError`), `RetryableError`, and the two credential errors.
+  `RetryableError` is raised once the SDK has spent its own retries, so the one exception
+  named for the worker's job was the one the worker could not see. Now mapped to
+  `ExtractionError` by a trailing `except anthropic.AnthropicError`.
+
+**Both earlier unknowns are now settled**, by a live call on 2026-10-14 against
+`claude-haiku-4-5`:
+
+- **The generated JSON Schema is accepted.** `format: "date"`, the money `pattern`, and
+  `anyOf` with a sibling `description` were each probed in isolation, and all three are
+  accepted by structured outputs — as is the full generated `receipt` schema.
+- **One extraction has run end to end.** A ten-line Spanish cafe receipt returned every
+  field correctly — total, ISO date, vendor, three line items — in 3.4s for **$0.001205**
+  (790 input, 83 output tokens). The hard-coded price table reproduces that figure to the
+  cent, so `price()` is now confirmed against a real call and not only against the
+  published rates.
+
+Three things that call surfaced, none of them blocking:
+
+- **Money arrives with the separator as printed** (`"7,15"`, `"1,80"`), exactly as the
+  system prompt asks. The comma-to-period normalisation in the coercion layer is
+  load-bearing, not defensive.
+- **List item fields are optional in a way top-level fields are not.** `build_json_schema`
+  wraps an optional top-level field as `anyOf: [T, null]` and keeps it in `required`, on
+  the reasoning that an explicit null beats a missing key. It does not apply that
+  treatment inside `items`, so an item field without `required: true` is simply absent
+  from the entry's `required` list and may not come back at all. The inconsistency is
+  worth settling before the eval harness starts measuring per-field accuracy.
+- **`format: "date"` quietly demands inference.** The receipt printed `12/05/2026` and the
+  model returned `2026-05-12`. Right for Spain, wrong for the identical receipt issued in
+  the US — and it sits awkwardly beside the system prompt's "never infer, calculate, or
+  invent a value." Ambiguous dates are a silent failure mode; a field description naming
+  the expected convention is the cheap fix. One for the eval set.
+
+Deliberately absent: extended thinking on the extraction call. Extraction is perception,
+not reasoning — the answer is on the page — so thinking would buy latency and tokens for
+a task whose difficulty is reading. Worth revisiting only if the eval harness shows the
+cheap tier failing on documents where the arithmetic, not the reading, is what is hard.
 
 ---
 
@@ -620,7 +765,9 @@ foreign keys by default, so any database created without the engine factory woul
 exactly that — and the test now documents why.
 
 Still uncovered: `main()`'s polling loop, and the OCR container's own `app.py` (tested
-by hand via the endpoint, not by pytest).
+by hand via the endpoint, not by pytest). Phase 2 added 219 tests of its own — see 7.5 —
+taking the suite to **347 in 1.7s**, still with no container, binary, network or API key
+required.
 
 **8.2 `/health` is liveness only.** It runs `SELECT 1`, which succeeds against any
 openable database — including one with zero tables. Demonstrated by rolling the migration
@@ -654,9 +801,13 @@ lunch**. Catching that requires comparison after extraction (same vendor, total,
 tax ID → probable duplicate → review queue). Phase 4, and a genuinely different mechanism
 from what exists.
 
-**8.7 No cost tracking yet.** `runs`/`steps` and the per-extraction `cost_usd`,
-`input_tokens`, `output_tokens` columns arrive with phase 2, when there is a model call to
-measure.
+**8.7 Cost tracking is built but unexercised.** `extractions` carries `input_tokens`,
+`output_tokens`, `cache_read_tokens`, `cost_usd` and `latency_ms`, and
+`AnthropicExtractor` populates all five, and the arithmetic now reconciles exactly
+against a live call — $0.001205 for one receipt (7.5). `cost_usd` is `Numeric(12, 6)`
+because that is a tenth of a cent, and rounding to 2dp would record it as zero. No
+`extractions` row has been persisted yet: nothing writes one until the worker is wired.
+`runs`/`steps` for multi-call traces remain phase 5.
 
 **8.8 Security posture is incomplete.** Uploads are size-capped and type-checked, and
 paths are derived from content hashes rather than user-supplied filenames (so path
@@ -669,8 +820,8 @@ redaction before analyst context, and authentication — there is currently no a
 
 | Phase | Ships | Demonstrates |
 |---|---|---|
-| **1** | Upload → dedup → OCR → stored text; status tracking; event log | Backend fundamentals, idempotency |
-| 2 | Registry + `receipt` type: routing, schema-enforced extraction, validator, mapper | Core pipeline end to end |
+| 1 | Upload → dedup → OCR → stored text; status tracking; event log | Backend fundamentals, idempotency |
+| **2** | Document types as data + `receipt`: routing, schema-enforced extraction, validator, mapper | Core pipeline end to end |
 | 3 | Eval harness on labeled receipts; per-field accuracy and cost per document | Measurement before optimisation |
 | 4 | Vision fallback escalation, review queue with corrections, `invoice` type | Cost engineering, human-in-the-loop |
 | 5 | LangGraph: batch fan-out, conditional edges, interrupt/resume at review, reprocessing | Orchestration where justified |
@@ -720,4 +871,8 @@ Points in this project worth being able to defend, and where the reasoning lives
   architecture, and the second reason is the interesting one
 - **What went wrong and what did you do about it?** §5.9 (a silent correctness bug caught
   before it shipped), §6.2 (discarding unverifiable work rather than building on it)
-- **What is still broken?** §8, all of it
+- **Why is a document type a database row rather than a class?** §5.20 — the phase-6
+  authoring UI is the reason the answer matters, and the closed rule vocabulary is the
+  price
+- **What is still broken?** §8, all of it — plus §7.5 for what phase 2 has written but
+  not yet verified

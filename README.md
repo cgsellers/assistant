@@ -2,13 +2,15 @@
 
 **A document ingestion pipeline for small-business finances, with a typed data layer and AI where it's actually needed.**
 
-Upload receipts and invoices. Local OCR reads them, deterministic routing picks the document type, a cheap model extracts JSON against a strict schema, code validates it and writes it into properly typed tables. A read-only analyst agent answers questions with citations back to the original documents. Integrations, exports, and anything else consume the same clean data.
+Upload receipts and invoices. Local OCR reads them, deterministic routing picks the document type, a cheap model extracts JSON against a strict schema, and deterministic code validates it before it becomes a ledger entry. A read-only analyst agent answers questions with citations back to the original documents. Integrations, exports, and anything else consume the same clean data.
 
 The design principle: **models only where perception or judgment is required.** Everything else is code that can be unit-tested and never hallucinates.
 
-> Status: **phase 1 in progress**. Settings, DB session layer and the phase-1 schema are in;
-> upload endpoint, worker and OCR container are next. The results table and demo land here
-> once the eval harness exists (phase 3).
+> Status: **phase 1 complete · phase 2 in progress**. Upload, dedup, OCR and the worker
+> run end to end under 128 tests. Phase 2's document-type layer — the definition format,
+> schema generation, routing and the model boundary — is written; the rule evaluator,
+> registry and worker wiring are not. The results table and demo land here once the eval
+> harness exists (phase 3).
 
 > **[Technical design & decision record](docs/DESIGN.md)** — architecture, the full
 > decision log with rejected alternatives, measured results, deviations from the original
@@ -39,14 +41,14 @@ flowchart TB
         EXT["Extractor - per-type schema, cheap text model"]
         VIS["Vision fallback - stronger model"]
         VAL["Validator - deterministic per-type rules"]
-        MAP["Mapper - JSON to typed DB rows"]
+        MAP["Mapper - validated JSON to canonical rows"]
     end
     subgraph Registry["Document type registry"]
-        DT["Per type: patterns, schema, rules, mapper"]
+        DT["Definition rows: matchers, fields, rules, profiles"]
     end
     subgraph Data["Data layer"]
-        RAW[("Raw: documents, ocr_results, extractions")]
-        TYPED[("Typed: receipts, invoices, line_items")]
+        RAW[("Raw: documents, ocr_results")]
+        TYPED[("Typed: extractions.raw_json")]
         CANON[("Canonical: transactions")]
     end
     subgraph Consumers
@@ -67,10 +69,9 @@ flowchart TB
     VAL -->|pass| MAP
     VAL -->|fail twice| REV
     REV -->|corrected| MAP
-    MAP --> TYPED
     MAP --> CANON
     OCR --> RAW
-    EXT --> RAW
+    EXT --> TYPED
     ROUTE -.-> DT
     EXT -.-> DT
     VAL -.-> DT
@@ -110,7 +111,7 @@ stateDiagram-v2
 
 ## Data model
 
-Three layers. Raw is immutable and versioned. Typed is what integrations map from. Canonical is the only thing the analyst reads.
+Three layers. Raw is immutable evidence. Typed is the extracted JSON, shaped by a document type. Canonical is the only thing the analyst reads.
 
 ```mermaid
 erDiagram
@@ -118,12 +119,8 @@ erDiagram
     DOCUMENTS ||--o{ EXTRACTIONS : has
     DOCUMENTS ||--o{ DOCUMENT_EVENTS : logs
     DOCUMENTS ||--o{ JOBS : enqueues
-    EXTRACTIONS ||--o| RECEIPTS : maps_to
-    EXTRACTIONS ||--o| INVOICES : maps_to
-    RECEIPTS ||--o{ LINE_ITEMS : contains
-    INVOICES ||--o{ LINE_ITEMS : contains
-    RECEIPTS ||--o{ TRANSACTIONS : yields
-    INVOICES ||--o{ TRANSACTIONS : yields
+    DOCUMENT_TYPES ||--o{ EXTRACTIONS : shapes
+    EXTRACTIONS ||--o{ TRANSACTIONS : yields
     TRANSACTIONS ||--o{ OUTBOX : emits
 
     DOCUMENTS {
@@ -167,19 +164,32 @@ erDiagram
         datetime locked_at
         text last_error
     }
+    DOCUMENT_TYPES {
+        uuid id PK
+        string name
+        int version
+        json definition
+        bool is_active
+        bool is_published
+        datetime created_at
+    }
     EXTRACTIONS {
         uuid id PK
         uuid document_id FK
         string doc_type
         int schema_version
+        string profile
         int attempt
         string model_used
         json raw_json
         json validation_errors
         bool is_current
+        bool is_trial
         int input_tokens
         int output_tokens
+        int cache_read_tokens
         decimal cost_usd
+        int latency_ms
     }
     TRANSACTIONS {
         uuid id PK
@@ -205,34 +215,93 @@ erDiagram
     }
 ```
 
-`documents`, `ocr_results`, `document_events` and `jobs` exist today (phase 1). The typed and
-canonical tables — `receipts`, `invoices`, `line_items`, `transactions`, `outbox` — land in
-phase 2 and phase 8. `jobs` is the queue: a worker claims a row, so there is no broker to run.
+`documents`, `ocr_results`, `document_events` and `jobs` shipped in phase 1;
+`document_types` and `extractions` are phase 2, and their migration is applied. The
+canonical tables — `transactions`, `outbox` — land in phase 8. `jobs` is the queue: a
+worker claims a row, so there is no broker to run.
 
-## Document type registry
+There are no per-document-type tables. `extractions.raw_json` **is** the typed layer: a
+document type with fifty optional fields needs no columns, and a field is promoted to a
+real column only when code has to act on it. `transactions` is exactly that promotion.
 
-Adding a document type means adding one module. Nothing else in the pipeline changes.
+## Document types are data, not code
 
-```python
-class DocumentType(Protocol):
-    name: str                    # "receipt", "invoice"
-    schema: Type[BaseModel]      # what the extractor must return (enforced via tool schema)
-    schema_version: int          # bump -> historical documents enter `reprocessing`
+Adding a document type inserts a row in `document_types`. No module, no deploy — and
+eventually no developer, which is the precondition for the phase-6 authoring UI. The
+format is itself a Pydantic model, so `Definition.model_json_schema()` describes it and
+the UI can generate its own form rather than hard-coding one.
 
-    def matches(self, ocr_text: str) -> float: ...           # deterministic, 0.0-1.0
-    def extraction_prompt(self, ocr_text: str) -> str: ...
-    def validate(self, data: BaseModel) -> list[str]: ...    # deterministic rules
-    def map_to_rows(self, data: BaseModel, document_id: str) -> MappedRows: ...
+```yaml
+name: receipt
+version: 1
+
+# Deterministic routing. No model call, so scoring every registered
+# type against every document costs nothing.
+matches:
+  keywords: [total, iva, ticket]
+  patterns: ['\b[A-Z]\d{8}\b']   # structural signals, e.g. a tax id format
+  min_score: 0.35                 # below this, not a match at all
+
+fields:
+  total:
+    type: money                # -> Decimal, never float
+    description: >-            # this string IS the extraction instruction
+      The amount actually charged, labelled TOTAL.
+      Not SUBTOTAL and not BASE IMPONIBLE.
+    required: true
+  issued_on:
+    type: date
+    description: The purchase date, usually printed beside the time.
+  line_items:
+    type: list
+    description: One entry per purchased item.
+    item_fields:
+      name:   {type: string, description: The item name as printed.}
+      amount: {type: money,  description: The line total for this item.}
+
+rules:                         # deterministic, evaluated in code
+  - {type: required,  field: total}
+  - {type: positive,  field: total}
+  - {type: not_future, field: issued_on, grace_days: 1}
+  - {type: line_items_sum, list_field: line_items, item_field: amount,
+     target: total, tolerance: 0.02}
+
+profiles:                      # per-issuer overrides — earned, not authored upfront
+  mercadona:
+    tax_ids: ['A46103834']     # stable; a trading name is not
+    descriptions:
+      total: The figure after "TOTAL (€)", bottom right, below the card line.
 ```
 
-Money is `Decimal`, never `float`.
+One generic processor interprets all of it:
+
+| Stage | What runs |
+|---|---|
+| Route | `match_score()` scores every active type; the highest above its own `min_score` wins. Nothing matches → a model classifier |
+| Profile | `select_profile()` identifies the issuer, tax id first, then name pattern |
+| Extract | `build_json_schema()` renders the fields — descriptions included — and the API constrains the response to that schema |
+| Validate | the rule list is evaluated deterministically; failures land in `extractions.validation_errors` |
+
+**Field descriptions are the prompt.** Pydantic and the API pass `description` through
+verbatim, which is why a per-issuer profile only needs to override descriptions to change
+extraction behaviour — and why it must not change the field set. The target shape belongs
+to the document type; only the layout belongs to the issuer.
+
+**Rules are a closed vocabulary** — `required`, `positive`, `range`, `sum_equals`,
+`line_items_sum`, `not_future`, `regex` — rather than an expression language. An analyst
+picks from a fixed set in the UI, and every rule is independently testable. A type that
+genuinely needs arbitrary logic gets a named Python validator instead, which keeps the
+escape hatch in code review rather than in the database.
+
+Money is `Decimal`, never `float`. It crosses the wire as a string for exactly that
+reason.
 
 ## Roadmap
 
 | Phase | Ships | Demonstrates |
 |---|---|---|
 | 1 | Upload → sha256 dedup → OCR → stored text; status tracking; event log | Backend fundamentals, idempotency |
-| 2 | Registry + `receipt`: routing, schema-enforced extraction, validator, mapper | Core pipeline end to end |
+| 2 | Document types as data + `receipt`: routing, schema-enforced extraction, validator, mapper | Core pipeline end to end |
 | 3 | Eval harness on labeled receipts; per-field accuracy and cost per document | Measurement before optimization |
 | 4 | Vision fallback escalation, review queue with corrections, `invoice` type | Cost engineering, human-in-the-loop |
 | 5 | LangGraph orchestration: batch fan-out, conditional edges, interrupt/resume at review, reprocessing | Orchestration where justified |
@@ -249,15 +318,16 @@ Phase 3 comes before phase 5 deliberately: the eval harness exists before the mu
 - **DB:** SQLite (dev, WAL mode) → Postgres
 - **Queue:** DB-backed `jobs` table polled by a worker (Redis later if needed)
 - **OCR:** self-hosted, behind an `OcrEngine` protocol, in its own container (PP-OCR models on ONNX Runtime; Tesseract as test double)
-- **Models:** Anthropic API behind a `ChatProvider` protocol; cheap tier for extraction, strong tier for fallback and analysis
+- **Models:** Anthropic API behind an `Extractor` protocol, using structured outputs; cheap tier for extraction, strong tier for fallback and analysis
 - **Orchestration:** LangGraph (phase 5+)
 - **Infra:** Docker Compose
 
 ## Design decisions and tradeoffs
 
 - **OCR-first, vision as fallback.** Text extraction is cheaper and more reproducible than vision; routing on OCR text is free. Vision handles the long tail.
-- **Per-type schemas, not one universal JSON.** Receipts, invoices, and statements are different shapes with different validation rules and target tables.
-- **No code sandbox for extraction.** A model returning JSON through a schema-enforced tool call can't do anything but return JSON. Sandboxing is reserved for parsing untrusted files and for model-generated parser templates (phase 6).
+- **Per-type schemas, not one universal JSON.** Receipts, invoices, and statements are different shapes with different validation rules.
+- **Document types are rows, not modules.** A definition is a value, so versioning is a new row and adding a type needs no deploy. The cost is a closed rule vocabulary instead of arbitrary per-type logic, and JSON instead of per-type columns.
+- **No code sandbox for extraction.** Structured outputs constrain the response to the JSON Schema directly, so the model can't do anything but return JSON. Sandboxing is reserved for parsing untrusted files and for model-generated parser templates (phase 6).
 - **Analyst never computes.** Arithmetic lives in deterministic tools. The model interprets and explains.
 - **LangGraph is one component, not the architecture.** Provider layer, tool registry, budgets, tracing, and evals all live outside the graph.
 - **Sensitive data.** Documents never leave local infrastructure until the extraction step. Encryption at rest and PII redaction before analyst context are planned.
