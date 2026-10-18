@@ -6,11 +6,10 @@ Upload receipts and invoices. Local OCR reads them, deterministic routing picks 
 
 The design principle: **models only where perception or judgment is required.** Everything else is code that can be unit-tested and never hallucinates.
 
-> Status: **phase 1 complete · phase 2 nearly there**. The pipeline runs end to end —
-> upload, dedup, OCR, routing, schema-enforced extraction, validation — under 363 tests,
-> and has been exercised against a real model call. What remains for phase 2 is a seeded
-> `receipt` type shipped with the repo. The results table and demo land here once the
-> eval harness exists (phase 3).
+> Status: **phases 1 and 2 complete**. Upload, dedup, OCR, routing, schema-enforced
+> extraction and validation run end to end under 386 tests, with a `receipt` type
+> shipped in the repo. A real receipt extracts every field correctly for ~$0.003. Next
+> is the eval harness (phase 3), which turns that single anecdote into a measurement.
 
 > **[Technical design & decision record](docs/DESIGN.md)** — architecture, the full
 > decision log with rejected alternatives, measured results, deviations from the original
@@ -342,6 +341,7 @@ cd ledgerline
 uv sync                            # creates .venv, installs from uv.lock
 cp .env.example .env               # ANTHROPIC_API_KEY is only needed from phase 2 on
 uv run alembic upgrade head        # creates ./data/ledgerline.db
+uv run python -m doctypes.seed     # loads the shipped document types
 uv run uvicorn api.main:app --reload
 # docs at http://127.0.0.1:8000/docs, health check at /health
 ```
@@ -350,7 +350,7 @@ Lint and tests:
 
 ```bash
 uv run ruff check .
-uv run pytest              # 128 tests, ~1s, no container or tesseract needed
+uv run pytest              # 386 tests, ~2s; no container, tesseract, network or API key
 ```
 
 Full `docker compose up` instructions land with the OCR container, later in phase 1.

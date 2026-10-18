@@ -1,0 +1,149 @@
+# The receipt document type.
+#
+# This file is data, not configuration: it is loaded into `document_types` by
+# `python -m doctypes.seed` and is the same shape the authoring UI will edit.
+# Editing it and re-running the seed writes a new version rather than mutating
+# the old one, so extractions already produced keep their meaning.
+#
+# The descriptions are the extraction instructions. They are the part worth
+# spending time on -- prefer naming the label a value sits next to over
+# describing where it is on the page, because an issuer redesigning their
+# template moves the position and keeps the label.
+
+name: receipt
+display_name: Receipt
+description: >-
+  A point-of-sale receipt: what was bought, what it cost, and who sold it.
+  Spanish-leaning, because that is the corpus this was built against, but the
+  field set is ordinary enough to travel.
+
+matches:
+  # Any of these is evidence. Two independent signals are needed before a
+  # document is claimed as a receipt -- see min_score below.
+  keywords:
+    - total
+    - iva
+    - ticket
+    - efectivo
+    - tarjeta
+    - gracias por su compra
+  patterns:
+    - '\b[A-Z]-?\d{8}\b'      # Spanish CIF, e.g. A46103834
+    - '\b\d{8}-?[A-Z]\b'      # Spanish NIF/DNI, e.g. 12345678Z
+  # 2 of the 8 signals above. One keyword alone is too thin -- "total" appears
+  # on invoices, delivery notes and bank statements -- and demanding three
+  # loses the short till rolls that print little more than a total.
+  min_score: 0.2
+
+fields:
+  vendor:
+    type: string
+    description: >-
+      The trading name of the business, usually the largest text at the top
+      and often repeated in the footer. Not the street address, and not the
+      shopping centre or franchise group if a specific shop is also named.
+
+  tax_id:
+    type: string
+    description: >-
+      The seller's tax identifier, labelled CIF, NIF or NIT. A Spanish CIF is
+      a letter then eight digits; a NIF is eight digits then a letter. Return
+      it exactly as printed, including any hyphen.
+
+  issued_on:
+    type: date
+    description: >-
+      The date of purchase, usually printed beside the time near the ticket
+      number. Spanish receipts print day/month/year, so 12/05/2026 is the 12th
+      of May. Do not use a "valid until" or returns-deadline date.
+
+  subtotal:
+    type: money
+    description: >-
+      The pre-tax amount, labelled BASE, BASE IMPONIBLE or SUBTOTAL. Null if
+      the receipt only prints a single total, which is common on small tills.
+
+  tax_amount:
+    type: money
+    description: >-
+      The tax charged, labelled IVA and often with its rate beside it
+      ("IVA 10%"). The amount, not the percentage. If several IVA rates are
+      broken out, the sum of them.
+
+  total:
+    type: money
+    required: true
+    description: >-
+      The amount actually charged, labelled TOTAL, TOTAL A PAGAR or IMPORTE.
+      Not SUBTOTAL, not BASE IMPONIBLE, and not the cash tendered or the
+      change given. If a discount was applied, this is the figure after it.
+
+  currency:
+    type: string
+    choices: [EUR, USD, GBP]
+    description: >-
+      The currency of the amounts, from the symbol or code printed with them.
+      A bare euro sign means EUR. Null if nothing on the receipt says.
+
+  payment_method:
+    type: string
+    choices: [cash, card, other]
+    description: >-
+      How it was paid. EFECTIVO or METALICO is cash; TARJETA, VISA, MASTERCARD
+      or CONTACTLESS is card. Null if the receipt does not say.
+
+  line_items:
+    type: list
+    description: >-
+      One entry per purchased item. Skip subtotal, tax and total lines, and
+      skip the cash-tendered and change lines -- those are not purchases.
+    item_fields:
+      name:
+        type: string
+        required: true
+        description: The item name as printed, without its quantity or price.
+      quantity:
+        type: number
+        description: >-
+          How many of this item, if the line shows a count. Null when the line
+          names the item once with a single price.
+      amount:
+        type: money
+        required: true
+        description: >-
+          The total charged for this line, which is the rightmost amount on
+          it. Not the per-unit price when both are shown.
+
+rules:
+  # Deliberately conservative. A rule that misfires on a good extraction sends
+  # it to a human, which costs more than the rule saves. Rules skip fields
+  # that came back null, so these only bite when there is something to check.
+  - type: required
+    field: total
+
+  - type: positive
+    field: total
+    message: a receipt total should be positive; a refund belongs to a credit note
+
+  - type: not_future
+    field: issued_on
+    grace_days: 1
+
+  - type: regex
+    field: tax_id
+    pattern: '^[A-Z]-?\d{8}$|^\d{8}-?[A-Z]$'
+    message: tax_id does not look like a Spanish CIF or NIF
+
+  - type: sum_equals
+    target: total
+    of: [subtotal, tax_amount]
+    tolerance: 0.02
+    message: base plus IVA should equal the total
+
+# Not included, and why: a line_items_sum rule. Whether the printed line
+# prices already include IVA varies by till -- some receipts have the items
+# summing to the subtotal, others to the total -- so the rule would fail on
+# roughly half of a real corpus. It belongs in a per-issuer profile, where the
+# answer is knowable, rather than in the type where it is a coin flip.
+
+profiles: {}

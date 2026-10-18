@@ -12,6 +12,10 @@ dependencies = [
     "python-dotenv",
     "anthropic",
     "httpx",
+    # Seed document types are YAML: the descriptions are multi-line prose, and
+    # block scalars keep them readable. Declared rather than leaned on as a
+    # transitive dependency of the fastapi extras.
+    "pyyaml",
 ]
 
 [dependency-groups]

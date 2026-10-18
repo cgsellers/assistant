@@ -633,7 +633,7 @@ not currently in scope.
 Python 3.12.14 · FastAPI 0.141.1 · SQLAlchemy 2.0.52 · Pydantic 2.13.5 · Alembic 1.20.0
 anthropic 1.5.0
 Migration 6823df7fd6b2 (head, applied) · alembic check: no drift · ruff: clean
-pytest: 363 passed in 1.9s (128 phase 1 · 235 phase 2)
+pytest: 386 passed in 2.0s (128 phase 1 · 258 phase 2)
 ```
 
 ### 7.4 Phase 1 checklist
@@ -650,7 +650,7 @@ pytest: 363 passed in 1.9s (128 phase 1 · 235 phase 2)
 [x] PDF support via pypdfium2 rasterisation
 ```
 
-### 7.5 Phase 2 in progress — written, not verified
+### 7.5 Phase 2
 
 1,697 lines across two new packages (`doctypes/`, `llm/`) and the extract stage in the
 worker, plus two tables, under **235 new tests**:
@@ -675,7 +675,7 @@ Remaining before the phase-2 loop closes:
 [x] registry — load definitions from the table; route across active types
 [x] tests for doctypes/ and llm/ — 219 of them
 [x] worker wiring — `extract` is a second job kind, 21 more tests
-[ ] a seeded `receipt` definition shipped with the repo
+[x] a seeded `receipt` definition shipped with the repo
 ```
 
 **The loop closes.** A real worker process, against a real API, on a seeded Spanish cafe
@@ -689,6 +689,26 @@ convention explicitly, and `12/05/2026` came back as `2026-05-12`. That is the c
 for the date-inference trap above, and it works -- but it is a per-field instruction
 somebody has to remember to write, which makes it an eval-harness concern rather than a
 solved problem.
+
+**The shipped seed, same loop, real call.** `doctypes/seeds/receipt.yaml` against a
+twelve-line Spanish till roll: `classified -> extracted -> validated`, nine fields and
+three line items all correct, five rules passed, $0.002731 over 1,981 input and 150
+output tokens in 4.3s.
+
+Three things that run showed, all of them phase 3's business:
+
+- **The descriptions are most of the input cost.** Input went from 922 tokens to 1,981
+  between the throwaway definition and the shipped one, for the same receipt. The field
+  descriptions are the prompt, so writing them better and writing them longer are the
+  same action, and only measurement separates the two.
+- **The model inferred a currency the receipt does not state.** Nothing in the text
+  carries a symbol or code, the description says "Null if nothing on the receipt says",
+  and the system prompt says never infer -- and it answered `EUR` from the fact that the
+  receipt is Spanish. Defensible, probably even wanted, but it is not what was asked
+  for, and the only way to know how often that happens is to count it.
+- **Optional list item fields come back absent, not null.** Two of the three line items
+  have no `quantity` key at all, which is the `build_json_schema` inconsistency noted
+  above showing up in practice rather than in theory.
 
 Two correctness traps the tests pinned, both worth knowing about:
 
@@ -814,7 +834,7 @@ lunch**. Catching that requires comparison after extraction (same vendor, total,
 tax ID → probable duplicate → review queue). Phase 4, and a genuinely different mechanism
 from what exists.
 
-**8.7 Cost tracking is built but unexercised.** `extractions` carries `input_tokens`,
+**8.7 Cost tracking is built, and exercised once.** `extractions` carries `input_tokens`,
 `output_tokens`, `cache_read_tokens`, `cost_usd` and `latency_ms`, and
 `AnthropicExtractor` populates all five, and the arithmetic now reconciles exactly
 against a live call — $0.001205 for one receipt (7.5). `cost_usd` is `Numeric(12, 6)`
