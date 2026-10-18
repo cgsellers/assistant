@@ -432,10 +432,9 @@ class TestPositiveRule:
     def test_a_tiny_positive_amount_passes(self):
         assert _check(self.rule, self.fields, {"total": Decimal("0.01")}) == []
 
-    def test_reports_a_null_instead_of_crashing(self):
-        errors = _check(self.rule, self.fields, {"total": None})
-        assert len(errors) == 1
-        assert "null" in errors[0]
+    def test_stays_quiet_on_a_null(self):
+        """Absence is `required`'s question to answer, not this rule's."""
+        assert _check(self.rule, self.fields, {"total": None}) == []
 
     def test_reports_a_non_number_instead_of_crashing(self):
         """Coercion leaves None behind, but a hand-built row might not."""
@@ -489,11 +488,9 @@ class TestRangeRule:
         rule = RangeRule(field="tax_rate")
         assert _check(rule, self.fields, {"tax_rate": None}) == []
 
-    def test_reports_a_null_instead_of_crashing(self):
+    def test_stays_quiet_on_a_null(self):
         rule = RangeRule(field="tax_rate", min=0.0)
-        errors = _check(rule, self.fields, {"tax_rate": None})
-        assert len(errors) == 1
-        assert "null" in errors[0]
+        assert _check(rule, self.fields, {"tax_rate": None}) == []
 
     def test_compares_in_decimal(self):
         """0.1 + 0.2 > 0.3 as floats; the boundary must not be decided that way."""
@@ -547,21 +544,18 @@ class TestSumEqualsRule:
         rule = SumEqualsRule(target="total", of=["subtotal"])
         assert _check(rule, self.fields, self._row("10.00")) == []
 
-    def test_reports_a_null_addend_instead_of_crashing(self):
+    def test_stays_quiet_on_a_null_addend(self):
+        """A till roll that prints no tax line leaves the equation unanswerable."""
         row = self._row("12.10") | {"tax": None}
-        errors = _check(self.rule, self.fields, row)
-        assert len(errors) == 1
-        assert "tax is null" in errors[0]
+        assert _check(self.rule, self.fields, row) == []
 
-    def test_reports_a_null_target(self):
+    def test_stays_quiet_on_a_null_target(self):
         row = self._row("12.10") | {"total": None}
-        errors = _check(self.rule, self.fields, row)
-        assert "total is null" in errors[0]
+        assert _check(self.rule, self.fields, row) == []
 
-    def test_reports_every_missing_field_at_once(self):
-        errors = _check(self.rule, self.fields, {"total": None, "subtotal": None, "tax": None})
-        assert len(errors) == 1
-        assert errors[0].count("is null") == 3
+    def test_stays_quiet_when_nothing_was_extracted(self):
+        row = {"total": None, "subtotal": None, "tax": None}
+        assert _check(self.rule, self.fields, row) == []
 
     def test_custom_message_wins(self):
         rule = SumEqualsRule(
@@ -606,9 +600,10 @@ class TestLineItemsSumRule:
         row = {"total": Decimal("0.00"), "line_items": []}
         assert _check(self.rule, self.fields, row) == []
 
-    def test_an_empty_list_against_a_real_total_fails(self):
+    def test_an_empty_list_means_nothing_found_not_a_sum_of_zero(self):
+        """`[]` from a model is "I saw no items", which is not a claim they total 0."""
         row = {"total": Decimal("7.15"), "line_items": []}
-        assert len(_check(self.rule, self.fields, row)) == 1
+        assert _check(self.rule, self.fields, row) == []
 
     def test_a_null_line_amount_is_named_not_summed_as_zero(self):
         """An unreadable line makes the total unknown, not smaller."""
@@ -618,15 +613,13 @@ class TestLineItemsSumRule:
         assert len(errors) == 1
         assert "line_items[1].amount is null" in errors[0]
 
-    def test_reports_a_null_list(self):
+    def test_stays_quiet_on_a_null_list(self):
         row = {"total": Decimal("7.15"), "line_items": None}
-        errors = _check(self.rule, self.fields, row)
-        assert "line_items is null" in errors[0]
+        assert _check(self.rule, self.fields, row) == []
 
-    def test_reports_a_null_target(self):
+    def test_stays_quiet_on_a_null_target(self):
         row = self._row("7.15") | {"total": None}
-        errors = _check(self.rule, self.fields, row)
-        assert "total is null" in errors[0]
+        assert _check(self.rule, self.fields, row) == []
 
     def test_sums_in_decimal(self):
         """Three cent values a float sum would land 0.0000000000000004 away from."""
@@ -682,10 +675,9 @@ class TestNotFutureRule:
         rule = NotFutureRule(field="issued_on", grace_days=30)
         assert _check(rule, self.fields, {"issued_on": TODAY + timedelta(days=29)}) == []
 
-    def test_reports_a_null_instead_of_crashing(self):
-        errors = _check(self.rule, self.fields, {"issued_on": None})
-        assert len(errors) == 1
-        assert "null" in errors[0]
+    def test_stays_quiet_on_a_null(self):
+        """A date that did not survive OCR is incomplete, not in the future."""
+        assert _check(self.rule, self.fields, {"issued_on": None}) == []
 
     def test_reports_an_uncoerced_string_instead_of_crashing(self):
         errors = _check(self.rule, self.fields, {"issued_on": "2026-05-14"})
@@ -715,10 +707,8 @@ class TestRegexRule:
         rule = RegexRule(field="tax_id", pattern=r"\d{8}")
         assert _check(rule, self.fields, {"tax_id": "NIF: B12345678 "}) == []
 
-    def test_reports_a_null_instead_of_crashing(self):
-        errors = _check(self.rule, self.fields, {"tax_id": None})
-        assert len(errors) == 1
-        assert "null" in errors[0]
+    def test_stays_quiet_on_a_null(self):
+        assert _check(self.rule, self.fields, {"tax_id": None}) == []
 
     def test_reports_a_non_string_instead_of_crashing(self):
         errors = _check(self.rule, self.fields, {"tax_id": 12345678})
@@ -800,25 +790,77 @@ class TestValidate:
         _, errors = validate(self.definition, self._raw(total="9,00"))
         assert len(errors) == 1
 
-    def test_coercion_and_rule_errors_arrive_together(self):
+    def test_a_malformed_value_is_reported_by_shape_and_not_restated(self):
         """
-        A malformed amount is two findings: the shape, and the sum that can no
-        longer be checked. Both are true and both are actionable.
+        Coercion says what is wrong with the value. The rules that can no
+        longer run stay quiet rather than repeating it in weaker words: two
+        messages about one bad character is noise, and only the first says
+        what to do about it.
         """
         _, errors = validate(self.definition, self._raw(total="n/a", vendor=""))
         assert any(e.startswith("total:") for e in errors)
         assert any("vendor is required" in e for e in errors)
-        assert any("total is null" in e for e in errors)
+        assert not any("total is null" in e for e in errors)
 
     def test_coercion_errors_come_first(self):
         _, errors = validate(self.definition, self._raw(total="n/a"))
         assert errors[0].startswith("total:")
 
     def test_nothing_extracted_at_all(self):
-        """The degenerate case still reports rather than raising."""
+        """
+        The degenerate case reports what is actually wrong -- a required field
+        is missing -- rather than one complaint per rule that could not run.
+        An absent key is not a malformed value, so there are no coercion
+        errors either.
+        """
         data, errors = validate(self.definition, {})
         assert data == dict.fromkeys(["vendor", "issued_on", "total", "line_items"])
-        # One per rule, each naming the null it could not work with, and no
-        # coercion errors -- an absent key is not a malformed value.
-        assert len(errors) == 4
-        assert all("null" in e or "required" in e for e in errors)
+        assert errors == ["vendor is required but was not extracted"]
+
+
+class TestRulesOnOptionalFields:
+    """
+    The combination that has to work for a real document type: a field that is
+    often absent, carrying a rule that matters when it is present.
+
+    Before rules skipped nulls, every receipt whose date did not survive OCR
+    came back with "issued_on is null, so it cannot be checked against today"
+    and went to review for being incomplete rather than wrong.
+    """
+
+    definition = _definition(
+        {
+            "total": _spec(FieldType.MONEY, required=True),
+            "issued_on": _spec(FieldType.DATE),
+            "tax_id": _spec(FieldType.STRING),
+        },
+        [
+            RequiredRule(field="total"),
+            PositiveRule(field="total"),
+            NotFutureRule(field="issued_on"),
+            RegexRule(field="tax_id", pattern=r"^[A-Z]\d{8}$"),
+        ],
+    )
+
+    def test_a_receipt_missing_every_optional_field_still_passes(self):
+        _, errors = validate(
+            self.definition, {"total": "7,15", "issued_on": None, "tax_id": None}
+        )
+        assert errors == []
+
+    def test_an_absent_key_is_the_same_as_an_explicit_null(self):
+        _, errors = validate(self.definition, {"total": "7,15"})
+        assert errors == []
+
+    def test_the_rule_still_bites_when_the_field_is_there_and_wrong(self):
+        _, errors = validate(
+            self.definition, {"total": "7,15", "tax_id": "nonsense", "issued_on": None}
+        )
+        assert len(errors) == 1
+        assert "tax_id" in errors[0]
+
+    def test_a_required_field_is_still_caught_when_missing(self):
+        """Skipping nulls must not make `required` toothless."""
+        _, errors = validate(self.definition, {"total": None})
+        assert len(errors) == 1
+        assert "total is required" in errors[0]

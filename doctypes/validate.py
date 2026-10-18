@@ -227,9 +227,45 @@ def validate(definition: Definition, raw_json: dict) -> tuple[dict, list[str]]:
     return data, errors + evaluate(definition, data)
 
 
+def _absent(value: Any) -> bool:
+    """
+    Nothing to check. An empty list counts, matching how `required` reads one:
+    a model that found no line items answers `[]` as often as it answers null.
+    """
+    return value is None or (isinstance(value, list) and not value)
+
+
+def _referenced_fields(rule: Rule) -> list[str]:
+    """Every top-level field a rule reads. Validated to exist by Definition."""
+    names: list[str] = []
+    for attr in ("field", "target", "list_field"):
+        if (name := getattr(rule, attr, None)):
+            names.append(name)
+    names.extend(getattr(rule, "of", None) or [])
+    return names
+
+
 def _evaluate_rule(rule: Rule, data: dict) -> list[str]:
     if isinstance(rule, RequiredRule):
         return _check_required(rule, data)
+
+    # Every other rule answers "is this value wrong", not "is this value here".
+    # `required` is the rule that owns absence, so a rule whose inputs are
+    # missing has no question to answer and stays quiet.
+    #
+    # Without this, a rule on an optional field reports an error every time
+    # that field is legitimately absent -- not_future on a receipt whose date
+    # did not survive OCR, sum_equals on a till roll that prints no subtotal --
+    # and the document goes to review for being incomplete rather than wrong.
+    # That makes "optional field plus a rule" an unusable combination, which is
+    # most of the useful rules.
+    #
+    # A malformed value still reports: coercion already flagged its shape
+    # before nulling it, so the error says what is actually wrong with it
+    # rather than restating that the rule could not run.
+    if any(_absent(data.get(name)) for name in _referenced_fields(rule)):
+        return []
+
     if isinstance(rule, PositiveRule):
         return _check_positive(rule, data)
     if isinstance(rule, RangeRule):
