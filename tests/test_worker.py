@@ -6,11 +6,11 @@ from datetime import timedelta
 
 from core import repository
 from core.models import Document, DocumentEvent, Job, OcrResult, utcnow
-from core.status import DocStatus, JobStatus
+from core.status import DocStatus, JobKind, JobStatus
 from ocr.base import UnsupportedMediaType
 from worker import run as worker
 
-from .conftest import TINY_PNG, FakeEngine
+from .conftest import TINY_PNG, FakeEngine, ForbiddenExtractor
 
 
 def _ingest(session, data=TINY_PNG, name="receipt.png"):
@@ -293,12 +293,18 @@ class TestTick:
                 s, data=TINY_PNG, mime_type="image/png", original_filename="a.png"
             )
 
-        assert worker.tick(fake_engine) is True   # one job done
-        assert worker.tick(fake_engine) is False  # queue now empty
+        # OCR, then the extract job it queues, then an empty queue. The
+        # extractor is the forbidding one: no document type is registered, so
+        # routing must give up before anything reaches a model.
+        extractor = ForbiddenExtractor()
+        assert worker.tick(fake_engine, extractor) is True   # ocr
+        assert worker.tick(fake_engine, extractor) is True   # extract
+        assert worker.tick(fake_engine, extractor) is False  # queue now empty
 
         with session_factory() as s:
             assert s.query(OcrResult).count() == 1
-            assert s.query(Job).one().status == JobStatus.DONE
+            assert {j.status for j in s.query(Job).all()} == {JobStatus.DONE}
+            assert {j.kind for j in s.query(Job).all()} == {JobKind.OCR, JobKind.EXTRACT}
 
     def test_rejects_an_unknown_job_kind(self, session_factory, monkeypatch, fake_engine):
         monkeypatch.setattr(worker, "SessionLocal", session_factory)

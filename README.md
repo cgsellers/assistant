@@ -6,11 +6,11 @@ Upload receipts and invoices. Local OCR reads them, deterministic routing picks 
 
 The design principle: **models only where perception or judgment is required.** Everything else is code that can be unit-tested and never hallucinates.
 
-> Status: **phase 1 complete · phase 2 in progress**. Upload, dedup, OCR and the worker
-> run end to end under 128 tests. Phase 2's document-type layer — the definition format,
-> schema generation, routing and the model boundary — is written; the rule evaluator,
-> registry and worker wiring are not. The results table and demo land here once the eval
-> harness exists (phase 3).
+> Status: **phase 1 complete · phase 2 nearly there**. The pipeline runs end to end —
+> upload, dedup, OCR, routing, schema-enforced extraction, validation — under 363 tests,
+> and has been exercised against a real model call. What remains for phase 2 is a seeded
+> `receipt` type shipped with the repo. The results table and demo land here once the
+> eval harness exists (phase 3).
 
 > **[Technical design & decision record](docs/DESIGN.md)** — architecture, the full
 > decision log with rejected alternatives, measured results, deviations from the original

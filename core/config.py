@@ -7,9 +7,15 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    # Not needed until phase 2 (extraction). Optional so the API and worker can
-    # start without a key; the ChatProvider raises at first use if it's missing.
+    # Optional so the API and worker start without a key. The extractor builds
+    # its client at first use and raises there, so only the stage that actually
+    # calls the model is affected by a missing key.
     anthropic_api_key: str | None = None
+
+    # The cheap tier does extraction; the strong tier is phase 4's vision
+    # fallback. Configured rather than hard-coded because the phase 3 eval
+    # harness has to run the same documents through different tiers.
+    extraction_model: str = "claude-haiku-4-5"
 
     database_url: str = "sqlite:///./data/ledgerline.db"
     storage_dir: Path = Path("./data/files")

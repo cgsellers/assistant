@@ -39,6 +39,21 @@ class DocStatus(StrEnum):
     REPROCESSING = "reprocessing"
 
 
+class JobKind(StrEnum):
+    """
+    What a queued job does.
+
+    Each pipeline stage is its own job rather than one job walking the whole
+    pipeline. OCR is the expensive half -- seconds, and a container -- so a
+    model call failing must never cost a document its recognised text. Separate
+    rows also mean separate retry budgets, and a crash between stages resumes
+    at the stage that crashed.
+    """
+
+    OCR = "ocr"
+    EXTRACT = "extract"
+
+
 class JobStatus(StrEnum):
     """Lifecycle of a row in the `jobs` queue table."""
 

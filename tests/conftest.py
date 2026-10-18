@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import io
 from collections.abc import Iterator
+from decimal import Decimal
 
 import pytest
 from fastapi.testclient import TestClient
@@ -20,6 +21,8 @@ from api.main import app
 from core.config import Settings, get_settings
 from core.db import create_db_engine, get_session
 from core.models import Base
+from doctypes.definition import Definition
+from llm.base import ExtractionResult
 from ocr.base import OcrError, OcrOutput, TextBlock
 
 # --- A real 1x1 PNG, for tests that need valid bytes but no actual text ---
@@ -128,6 +131,83 @@ def fake_engine() -> FakeEngine:
 @pytest.fixture
 def failing_engine() -> FakeEngine:
     return FakeEngine(raises=OcrError("engine exploded"))
+
+
+# --- Fake extractors --------------------------------------------------------
+# Extractor is a Protocol for the same reason OcrEngine is: the extract stage
+# is testable with no API key, no network, and no spend.
+
+
+class FakeExtractor:
+    """Returns canned JSON and records what it was asked to extract."""
+
+    def __init__(
+        self,
+        data: dict | None = None,
+        raises: Exception | None = None,
+        model: str = "claude-haiku-4-5-20251001",
+    ):
+        self.data = {} if data is None else data
+        self.raises = raises
+        self.model = model
+        self.calls: list[dict] = []
+
+    def extract(self, *, json_schema: dict, text: str, doc_type: str) -> ExtractionResult:
+        self.calls.append({"json_schema": json_schema, "text": text, "doc_type": doc_type})
+        if self.raises is not None:
+            raise self.raises
+        # The numbers are the ones a real haiku-4-5 call returned for a receipt
+        # of this size, so assertions about cost are against a plausible row.
+        return ExtractionResult(
+            data=self.data,
+            model=self.model,
+            input_tokens=790,
+            output_tokens=83,
+            cache_read_tokens=0,
+            cost_usd=Decimal("0.001205"),
+            latency_ms=3370,
+            stop_reason="end_turn",
+            params={"doc_type": doc_type},
+        )
+
+
+class ForbiddenExtractor:
+    """
+    Fails the test if the model is called at all.
+
+    The default for tests that do not arrange an extraction: reaching the model
+    unexpectedly means a real deployment would have spent money there, which
+    should be loud rather than silently free.
+    """
+
+    model = "forbidden"
+
+    def extract(self, **kwargs) -> ExtractionResult:
+        raise AssertionError("extractor was called, but this test did not expect it")
+
+
+def receipt_definition(**overrides) -> Definition:
+    """
+    A minimal receipt type that matches the OCR text the fake engines return.
+
+    Deliberately small: tests that care about rules or profiles build their own
+    rather than bending this one into every shape.
+    """
+    spec = {
+        "name": "receipt",
+        "matches": {"keywords": ["total"], "min_score": 0.3},
+        "fields": {
+            "total": {
+                "type": "money",
+                "description": "The amount charged, labelled TOTAL.",
+                "required": True,
+            },
+            "vendor": {"type": "string", "description": "The business name."},
+        },
+        "rules": [{"type": "positive", "field": "total"}],
+    }
+    spec.update(overrides)
+    return Definition.model_validate(spec)
 
 
 # --- Image helpers ----------------------------------------------------------

@@ -633,7 +633,7 @@ not currently in scope.
 Python 3.12.14 · FastAPI 0.141.1 · SQLAlchemy 2.0.52 · Pydantic 2.13.5 · Alembic 1.20.0
 anthropic 1.5.0
 Migration 6823df7fd6b2 (head, applied) · alembic check: no drift · ruff: clean
-pytest: 347 passed in 1.7s (128 phase 1 · 219 phase 2)
+pytest: 363 passed in 1.9s (128 phase 1 · 235 phase 2)
 ```
 
 ### 7.4 Phase 1 checklist
@@ -652,8 +652,8 @@ pytest: 347 passed in 1.7s (128 phase 1 · 219 phase 2)
 
 ### 7.5 Phase 2 in progress — written, not verified
 
-1,258 lines in two new packages (`doctypes/`, `llm/`) plus two tables, uncommitted and
-not yet wired into the worker, under **219 new tests**:
+1,697 lines across two new packages (`doctypes/`, `llm/`) and the extract stage in the
+worker, plus two tables, under **235 new tests**:
 
 | Module | Provides |
 |---|---|
@@ -662,6 +662,7 @@ not yet wired into the worker, under **219 new tests**:
 | `doctypes/validate.py` | Coercion (money to `Decimal`, dates, nested lists) and the evaluator for all seven rule types |
 | `doctypes/registry.py` | `active_definitions()`, `route()` — loads types from the table and picks the highest scorer |
 | `core/repository.py` | `create_document_type_version()`, `get_active_document_type()`, `record_extraction()` |
+| `worker/run.py` | The `extract` stage: route, build the schema, call the model, validate, record |
 | `llm/base.py` | `Extractor` protocol; `ExtractionResult` carrying tokens, cost and latency as results rather than logs |
 | `llm/anthropic.py` | `AnthropicExtractor` via structured outputs, with a permanent/transient error split so the worker retries only what can succeed |
 | `core/models.py` | `document_types`, `extractions` — migration `6823df7fd6b2`, applied |
@@ -673,9 +674,21 @@ Remaining before the phase-2 loop closes:
 [x] coercion — money strings to Decimal, dates to date
 [x] registry — load definitions from the table; route across active types
 [x] tests for doctypes/ and llm/ — 219 of them
-[ ] worker wiring — "ocr" is still the only job kind
-[ ] a seeded `receipt` definition
+[x] worker wiring — `extract` is a second job kind, 21 more tests
+[ ] a seeded `receipt` definition shipped with the repo
 ```
+
+**The loop closes.** A real worker process, against a real API, on a seeded Spanish cafe
+receipt: `classified -> extracted -> validated`, every field correct, no validation
+errors, $0.001377 over 922 input and 91 output tokens, 3.1s. The `line_items_sum` rule
+passed with the tax difference inside tolerance, and `cost_usd` came back out of SQLite
+as a `Decimal`.
+
+Worth recording from that run: the `issued_on` description named the day/month/year
+convention explicitly, and `12/05/2026` came back as `2026-05-12`. That is the cheap fix
+for the date-inference trap above, and it works -- but it is a per-field instruction
+somebody has to remember to write, which makes it an eval-harness concern rather than a
+solved problem.
 
 Two correctness traps the tests pinned, both worth knowing about:
 

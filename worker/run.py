@@ -1,9 +1,12 @@
 """
 The job worker.
 
-Polls the `jobs` table, claims one row at a time, runs OCR, writes the result.
-No broker: the database is the queue. That is one less service to run, and the
-claim is transactional, which a Redis list is not.
+Polls the `jobs` table, claims one row at a time, and runs whichever stage
+the job names. No broker: the database is the queue. That is one less service
+to run, and the claim is transactional, which a Redis list is not.
+
+Two stages exist. `ocr` turns bytes into text. `extract` routes that text to a
+document type, extracts against the type's schema and validates the result.
 
 Run it with:  uv run python -m worker.run
 """
@@ -20,10 +23,15 @@ from datetime import timedelta
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from core import storage
+from core import repository, storage
 from core.db import SessionLocal
 from core.models import Document, DocumentEvent, Job, OcrResult, utcnow
-from core.status import DocStatus, JobStatus
+from core.status import DocStatus, JobKind, JobStatus
+from doctypes import registry
+from doctypes.schema import build_json_schema
+from doctypes.validate import validate
+from llm import get_extractor
+from llm.base import ExtractionError, ExtractionRefused, Extractor
 from ocr import get_engine
 from ocr.base import OcrEngine, OcrError, UnsupportedMediaType
 
@@ -155,6 +163,11 @@ def run_ocr_job(session: Session, job: Job, engine: OcrEngine) -> None:
             "chars": len(output.full_text),
         },
     )
+    # Extraction is a separate job rather than a continuation of this one.
+    # Queued in the same transaction as the result, so a document never has
+    # recognised text without something scheduled to read it.
+    session.add(Job(kind=JobKind.EXTRACT, document_id=document.id))
+
     job.status = JobStatus.DONE
     job.last_error = None
     session.commit()
@@ -165,19 +178,41 @@ def run_ocr_job(session: Session, job: Job, engine: OcrEngine) -> None:
 
 
 def _fail_permanently(
-    session: Session, job: Job, document: Document, reason: str, *, kind: str
+    session: Session,
+    job: Job,
+    document: Document,
+    reason: str,
+    *,
+    kind: str,
+    status: str = DocStatus.OCR_FAILED,
 ) -> None:
+    """
+    Give up on this job and park the document somewhere a human can find it.
+
+    `status` differs by stage: unreadable bytes end at `ocr_failed`, while a
+    document that was read fine but could not be extracted goes to
+    `needs_review`, because the thing to do about it is look at it.
+    """
     job.status = JobStatus.FAILED
     job.last_error = reason
-    _record_transition(session, document, DocStatus.OCR_FAILED, {"reason": reason, "kind": kind})
+    _record_transition(session, document, status, {"reason": reason, "kind": kind})
     session.commit()
-    log.warning("ocr failed permanently document=%s %s", document.id[:8], reason)
+    log.warning(
+        "%s failed permanently document=%s %s", job.kind, document.id[:8], reason
+    )
 
 
-def _fail_or_retry(session: Session, job: Job, document: Document, reason: str) -> None:
+def _fail_or_retry(
+    session: Session,
+    job: Job,
+    document: Document,
+    reason: str,
+    *,
+    status: str = DocStatus.OCR_FAILED,
+) -> None:
     """Transient failure: back off and try again until max_attempts is spent."""
     if job.attempts >= job.max_attempts:
-        _fail_permanently(session, job, document, reason, kind="exhausted")
+        _fail_permanently(session, job, document, reason, kind="exhausted", status=status)
         return
 
     delay = BACKOFF_BASE_SECONDS ** job.attempts
@@ -188,13 +223,141 @@ def _fail_or_retry(session: Session, job: Job, document: Document, reason: str) 
     job.last_error = reason
     session.commit()
     log.warning(
-        "ocr attempt %d/%d failed document=%s retrying in %ds: %s",
-        job.attempts, job.max_attempts, document.id[:8], delay, reason,
+        "%s attempt %d/%d failed document=%s retrying in %ds: %s",
+        job.kind, job.attempts, job.max_attempts, document.id[:8], delay, reason,
     )
 
 
-def tick(engine: OcrEngine) -> bool:
-    """One unit of work. Returns True if a job was processed."""
+def run_extract_job(session: Session, job: Job, extractor: Extractor) -> None:
+    """
+    Route one document to a type, extract against its schema, validate.
+
+    Reads stored OCR text rather than the original file, which is what makes
+    `reprocessing` cheap later: a schema bump re-runs this stage alone, with
+    no re-upload and no second trip through the container.
+    """
+    document = session.get(Document, job.document_id)
+    if document is None:
+        job.status = JobStatus.FAILED
+        job.last_error = "document row is gone"
+        session.commit()
+        return
+
+    ocr = repository.get_ocr_result(session, document.id)
+    if ocr is None:
+        # Only reachable if the row was deleted between the two jobs: this job
+        # is queued by run_ocr_job after the result is written.
+        _fail_permanently(
+            session, job, document, "no OCR result to extract from",
+            kind="missing_ocr", status=DocStatus.NEEDS_REVIEW,
+        )
+        return
+
+    text = ocr.full_text or ""
+    match = registry.route(session, text)
+    if match is None:
+        # Not a failure. No registered type cleared its own min_score, so there
+        # is nothing to extract against. A model classifier for this case is
+        # phase 4; until then the document stops here rather than being
+        # extracted against a guess. The job did its work, so it is done.
+        _record_transition(
+            session, document, DocStatus.UNSUPPORTED,
+            {"reason": "no document type matched", "chars": len(text)},
+        )
+        job.status = JobStatus.DONE
+        job.last_error = None
+        session.commit()
+        log.info("unsupported document=%s no type matched %d chars", document.id[:8], len(text))
+        return
+
+    definition = match.definition
+    # Recorded before the model call, so a document that dies mid-extraction
+    # still shows what it was routed to and how confidently. On a retry this
+    # logs a second classified event, which is honest: routing did run twice.
+    _record_transition(
+        session, document, DocStatus.CLASSIFIED,
+        {
+            "doc_type": definition.name,
+            "schema_version": definition.version,
+            "score": match.score,
+            "profile": match.profile_key,
+        },
+    )
+    session.commit()
+
+    schema = build_json_schema(definition, match.profile)
+    try:
+        result = extractor.extract(
+            json_schema=schema, text=text, doc_type=definition.name
+        )
+    except ExtractionRefused as exc:
+        # Permanent for these bytes: a refusal or a truncation reproduces.
+        _fail_permanently(
+            session, job, document, str(exc),
+            kind="refused", status=DocStatus.NEEDS_REVIEW,
+        )
+        return
+    except ExtractionError as exc:
+        _fail_or_retry(session, job, document, str(exc), status=DocStatus.NEEDS_REVIEW)
+        return
+
+    # raw_json stores what the model actually returned, not the coerced values:
+    # Decimal and date do not survive a JSON column, and the raw answer is the
+    # evidence an eval run has to score against.
+    _, errors = validate(definition, result.data)
+
+    repository.record_extraction(
+        session,
+        document_id=document.id,
+        doc_type=definition.name,
+        schema_version=definition.version,
+        model_used=result.model,
+        profile=match.profile_key,
+        raw_json=result.data,
+        validation_errors=errors,
+        input_tokens=result.input_tokens,
+        output_tokens=result.output_tokens,
+        cache_read_tokens=result.cache_read_tokens,
+        cost_usd=result.cost_usd,
+        latency_ms=result.latency_ms,
+    )
+
+    _record_transition(
+        session, document, DocStatus.EXTRACTED,
+        {
+            "model": result.model,
+            "cost_usd": str(result.cost_usd),
+            "input_tokens": result.input_tokens,
+            "output_tokens": result.output_tokens,
+            "latency_ms": result.latency_ms,
+        },
+    )
+    # Two transitions rather than one: the state machine distinguishes "the
+    # model answered" from "the answer survived the rules", and phase 4 slots
+    # the vision escalation between them.
+    if errors:
+        _record_transition(
+            session, document, DocStatus.NEEDS_REVIEW, {"validation_errors": errors}
+        )
+    else:
+        _record_transition(session, document, DocStatus.VALIDATED, None)
+
+    job.status = JobStatus.DONE
+    job.last_error = None
+    session.commit()
+    log.info(
+        "extract done document=%s type=%s v%d errors=%d cost=$%s",
+        document.id[:8], definition.name, definition.version, len(errors), result.cost_usd,
+    )
+
+
+def tick(engine: OcrEngine, extractor: Extractor | None = None) -> bool:
+    """
+    One unit of work. Returns True if a job was processed.
+
+    `extractor` is built on demand rather than up front, so a worker that only
+    ever sees OCR jobs never constructs one and never needs an API key.
+    """
     with SessionLocal() as session:
         if (returned := reclaim_stale(session)):
             log.info("reclaimed %d stale job(s)", returned)
@@ -204,8 +367,10 @@ def tick(engine: OcrEngine) -> bool:
             return False
 
         log.info("claimed job=%s kind=%s attempt=%d", job.id[:8], job.kind, job.attempts)
-        if job.kind == "ocr":
+        if job.kind == JobKind.OCR:
             run_ocr_job(session, job, engine)
+        elif job.kind == JobKind.EXTRACT:
+            run_extract_job(session, job, extractor or get_extractor())
         else:
             job.status = JobStatus.FAILED
             job.last_error = f"unknown job kind {job.kind!r}"

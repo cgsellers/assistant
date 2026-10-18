@@ -22,7 +22,7 @@ from core.models import (
     Job,
     OcrResult,
 )
-from core.status import DocStatus
+from core.status import DocStatus, JobKind
 from doctypes.definition import Definition
 
 
@@ -97,7 +97,7 @@ def ingest(
     # The worker polls this table. Queuing inside the same transaction means a
     # document is never visible without its job, and never has a job without
     # being visible.
-    session.add(Job(kind="ocr", document_id=document.id))
+    session.add(Job(kind=JobKind.OCR, document_id=document.id))
 
     session.commit()
     return document, True
