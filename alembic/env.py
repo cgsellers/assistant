@@ -8,7 +8,7 @@ source of truth for the URL, in core.config), and hand it our model metadata so
 
 from logging.config import fileConfig
 
-from sqlalchemy import engine_from_config, pool
+from sqlalchemy import TypeDecorator, engine_from_config, pool
 
 from alembic import context
 from core.config import get_settings
@@ -34,6 +34,28 @@ target_metadata = Base.metadata
 RENDER_AS_BATCH = True
 
 
+def render_item(type_: str, obj: object, autogen_context) -> str | bool:
+    """
+    Render our TypeDecorators as the plain SQL type underneath them.
+
+    Without this, autogenerate emits `core.models.Money(...)` into the
+    migration, which makes a permanent migration file depend on application
+    code -- rename or delete that class and old migrations stop importing.
+    (It also emitted the reference without the matching import, which failed
+    outright with NameError.)
+
+    A TypeDecorator adds no DDL of its own: the column type is entirely its
+    `impl`, and the Python-side conversion only matters at runtime. Emitting
+    the impl is therefore both accurate and stable.
+
+    Returning False falls back to Alembic's default rendering.
+    """
+    if type_ == "type" and isinstance(obj, TypeDecorator):
+        impl = getattr(obj, "impl_instance", obj.impl)
+        return f"sa.{impl!r}"
+    return False
+
+
 def run_migrations_offline() -> None:
     """Emit SQL to stdout instead of running it -- useful for reviewing DDL."""
     context.configure(
@@ -42,6 +64,7 @@ def run_migrations_offline() -> None:
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
         render_as_batch=RENDER_AS_BATCH,
+        render_item=render_item,
     )
     with context.begin_transaction():
         context.run_migrations()
@@ -59,6 +82,7 @@ def run_migrations_online() -> None:
             connection=connection,
             target_metadata=target_metadata,
             render_as_batch=RENDER_AS_BATCH,
+            render_item=render_item,
         )
         with context.begin_transaction():
             context.run_migrations()
