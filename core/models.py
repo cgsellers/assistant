@@ -10,12 +10,13 @@ A `Mapped[str | None]` annotation makes the column NULLable automatically.
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 from sqlalchemy import (
     JSON,
     Boolean,
+    Date,
     DateTime,
     Float,
     ForeignKey,
@@ -321,3 +322,72 @@ class Extraction(Base):
 
 # The extractor's lookup: "the current, non-trial extraction for this document".
 Index("ix_extractions_current", Extraction.document_id, Extraction.is_current)
+
+
+class Transaction(Base):
+    """
+    The canonical ledger row: one real-world movement of money.
+
+    The only table the analyst agent reads. Deliberately narrow -- a document
+    type may collect fifty fields, and six of them matter to "what did we
+    spend". Everything else stays in `extractions.raw_json`, which is what the
+    raw layer is for. A field is promoted here when code must act on it.
+
+    One row per document, not per extraction. A retry or a correction writes a
+    new row and demotes the old one, the same way extractions work: a ledger
+    that double-counts a re-run receipt is worse than useless, and summing
+    `WHERE is_current` has to be the obvious correct query.
+    """
+
+    __tablename__ = "transactions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+
+    #: Provenance, and the citation the analyst agent answers with. Every
+    #: figure in the ledger can be traced back to the words on a page.
+    source_extraction_id: Mapped[str] = mapped_column(
+        ForeignKey("extractions.id"), index=True
+    )
+    #: Denormalised from the extraction: the supersede query and every
+    #: "show me this document's ledger entry" lookup go through it.
+    document_id: Mapped[str] = mapped_column(ForeignKey("documents.id"), index=True)
+    #: The document type that produced this, e.g. "receipt".
+    source_type: Mapped[str] = mapped_column(String(50))
+
+    # A plain Date, not a timestamp. A purchase happened on a day; the hour
+    # a till roll was printed is not ledger information, and storing it as a
+    # datetime would invite timezone questions that have no answer here.
+    occurred_on: Mapped[date | None] = mapped_column(Date)
+    counterparty: Mapped[str | None] = mapped_column(String(200))
+    counterparty_tax_id: Mapped[str | None] = mapped_column(String(50))
+    #: "out" for money leaving, "in" for money arriving. A property of the
+    #: document type rather than the document -- see CanonicalMap.
+    direction: Mapped[str] = mapped_column(String(10))
+
+    # Numeric(14, 4) rather than (14, 2): the wire format caps at two decimal
+    # places today, but that is a property of the money pattern in
+    # doctypes.schema rather than of money, and currencies with three exist.
+    # Four costs nothing and removes a silent rounding trap.
+    amount: Mapped[Decimal] = mapped_column(Numeric(14, 4))
+    tax_amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
+    #: Null when the document does not say. Not guessed: a receipt printed in
+    #: Spain is usually EUR and "usually" has no place in a ledger.
+    currency: Mapped[str | None] = mapped_column(String(3))
+
+    #: Assigned later, by rules or by a human. Categorisation is not
+    #: extraction and does not belong in the same step.
+    category: Mapped[str | None] = mapped_column(String(100))
+    #: True once a human has confirmed the row, which is what lets a report
+    #: distinguish "the model said so" from "somebody checked".
+    user_verified: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    is_current: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+    extraction: Mapped[Extraction] = relationship()
+    document: Mapped[Document] = relationship()
+
+
+# The ledger's own lookup: "this document's live entry", and the join behind
+# every "what did we spend" query.
+Index("ix_transactions_current", Transaction.document_id, Transaction.is_current)

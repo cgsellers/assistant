@@ -219,6 +219,60 @@ class Profile(BaseModel):
         return self
 
 
+class Direction(StrEnum):
+    """Which way the money went, from this business's point of view."""
+
+    OUT = "out"  # a purchase receipt, a supplier invoice
+    IN = "in"  # a sales invoice, a refund
+
+
+class CanonicalMap(BaseModel):
+    """
+    How this document type's fields become a row in `transactions`.
+
+    Data rather than code, for the same reason the rest of a definition is: a
+    mapper written per type is a module per type, which is the design 5.20
+    rejected. An analyst adding a document type in the UI has to be able to
+    say "the total is the amount" without shipping Python.
+
+    Only the fields the canonical layer actually has. Everything else a
+    document type collects stays in `extractions.raw_json`, which is the point
+    of having a raw layer: the ledger is deliberately narrow, and a field is
+    promoted into it only when something downstream must act on it.
+
+    `direction` is a constant rather than a field reference because it is a
+    property of the type, not of the document -- every purchase receipt is
+    money leaving. A type that could be either way round wants two types.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    direction: Direction
+    #: The field holding the amount charged. Required: a ledger row without
+    #: an amount is not a transaction.
+    amount: str
+    occurred_on: str | None = None
+    counterparty: str | None = None
+    counterparty_tax_id: str | None = None
+    tax_amount: str | None = None
+    currency: str | None = None
+
+    def referenced(self) -> dict[str, str]:
+        """Canonical column -> document type field name, for the ones that are set."""
+        return {
+            column: field
+            for column, field in (
+                ("amount", self.amount),
+                ("occurred_on", self.occurred_on),
+                ("counterparty", self.counterparty),
+                ("counterparty_tax_id", self.counterparty_tax_id),
+                ("tax_amount", self.tax_amount),
+                ("currency", self.currency),
+            )
+            if field is not None
+        }
+
+
 class Definition(BaseModel):
     """A complete document type."""
 
@@ -233,6 +287,10 @@ class Definition(BaseModel):
     fields: dict[str, FieldSpec] = Field(min_length=1)
     rules: list[Rule] = Field(default_factory=list)
     profiles: dict[str, Profile] = Field(default_factory=dict)
+    #: How to write this type into `transactions`. Optional: a type without
+    #: one is extracted and validated but never reaches the ledger, which is
+    #: the right behaviour for a type an analyst is still shaping.
+    canonical: CanonicalMap | None = None
 
     @field_validator("fields")
     @classmethod
@@ -280,5 +338,26 @@ class Definition(BaseModel):
                 raise ValueError(
                     f"profile {key!r} overrides unknown field(s): {sorted(unknown)}"
                 )
+
+        if self.canonical is not None:
+            # The canonical layer is typed where the raw layer is not, so a
+            # mapping that points at the wrong kind of field would fail at
+            # insert time on some later document rather than here.
+            expected = {
+                "amount": FieldType.MONEY,
+                "tax_amount": FieldType.MONEY,
+                "occurred_on": FieldType.DATE,
+            }
+            for column, name in self.canonical.referenced().items():
+                if name not in known:
+                    raise ValueError(
+                        f"canonical.{column} references unknown field {name!r}"
+                    )
+                wanted = expected.get(column)
+                if wanted is not None and self.fields[name].type is not wanted:
+                    raise ValueError(
+                        f"canonical.{column} must point at a {wanted} field, but "
+                        f"{name!r} is {self.fields[name].type}"
+                    )
 
         return self
