@@ -8,7 +8,7 @@ The design principle: **models only where perception or judgment is required.** 
 
 > Status: **phases 1 and 2 complete · phase 3 in progress**. Upload, dedup, OCR,
 > routing, schema-enforced extraction, validation and the canonical ledger run end to
-> end under 543 tests, with a `receipt` type shipped in the repo. The eval harness scores a labelled corpus
+> end under 561 tests, with a `receipt` type shipped in the repo. The eval harness scores a labelled corpus
 > per field and reports cost per document; the corpus itself is still being gathered,
 > so there are no accuracy numbers worth quoting yet.
 
@@ -369,8 +369,20 @@ Lint and tests:
 
 ```bash
 uv run ruff check .
-uv run pytest              # 543 tests, ~3s; no container, tesseract, network or API key
+uv run pytest              # 561 tests, ~3s; no container, tesseract, network or API key
 ```
+
+Measuring extraction against a labelled corpus:
+
+```bash
+uv run python -m evals.run --draft-labels   # model drafts labels for you to correct
+uv run python -m evals.run --dry-run        # validate the labels, no API calls
+uv run python -m evals.run                  # score them, per field
+uv run python -m evals.run --compare claude-sonnet-5   # two models, diffed
+```
+
+Drafts are written `verified: false` and the runner will not score them until a human
+has checked each field against the document and said otherwise.
 
 Full `docker compose up` instructions land with the OCR container, later in phase 1.
 

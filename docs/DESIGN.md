@@ -662,7 +662,7 @@ not currently in scope.
 Python 3.12.14 · FastAPI 0.141.1 · SQLAlchemy 2.0.52 · Pydantic 2.13.5 · Alembic 1.20.0
 anthropic 1.5.0
 Migration 6823df7fd6b2 (head, applied) · alembic check: no drift · ruff: clean
-pytest: 543 passed in 2.7s (128 phase 1 · 324 phase 2 · 91 phase 3)
+pytest: 561 passed in 3.0s (128 phase 1 · 324 phase 2 · 109 phase 3)
 ```
 
 ### 7.4 Phase 1 checklist
@@ -797,7 +797,8 @@ acts on, and it is testable without a single real receipt.
 |---|---|
 | `evals/labels.py` | The label format and loader, plus `check` -- a corpus is validated before a run starts, because every document costs a model call |
 | `evals/score.py` | Per-field scoring, the five outcomes, and aggregation across a run |
-| `evals/run.py` | The runner, the report, and `--compare`; `python -m evals.run` |
+| `evals/run.py` | The runner, the report, `--compare` and `--draft-labels`; `python -m evals.run` |
+| `evals/draft.py` | Model output written into label files for a human to correct |
 | `evals/examples/` | Three synthetic labelled receipts, committed |
 
 **The unit is a field, not a document.** "87% of documents were perfect" hides
@@ -835,6 +836,36 @@ The corpus is prepared once and shared between variants: text is resolved and
 routing decided before either model is called. Re-resolving per variant would
 let OCR nondeterminism surface as a difference between models, which is
 exactly what a comparison is supposed to rule out.
+
+**Labelling is correction, not transcription.** `--draft-labels` runs the
+pipeline over unlabelled documents and writes what it found into label files.
+Most of labelling is transcription and the extractor already does that, so a
+person corrects rather than types.
+
+Every draft lands `verified: false`, and the runner refuses to score an
+unverified label. The default is `false` even for a hand-written label, which
+is mild friction in exchange for the one guarantee that matters: a draft
+cannot silently become ground truth. Without it the model marks its own
+homework and scores 100%, and the number looks exactly like evidence.
+
+Validity is checked before verification -- a malformed label is broken whether
+or not anyone signed it off, and reporting "unverified" at someone holding a
+label with a typo in it helps nobody.
+
+**Why the flag is not paranoia.** Drafting a rendered receipt through
+Tesseract produced this, and every line of it reads plausibly:
+
+| On the page | OCR read | The draft said |
+|---|---|---|
+| `07/03/2026` | `07/09/2028` | `issued_on: '2028-09-07'` |
+| `TOTAL 2,90` | `TOTAL 280` | `total: '2.80'` |
+| `CIF B87654321` | `CIF 87854321` | `tax_id: '87854321'` |
+
+The extractor was not at fault -- it transcribed what OCR gave it rather than
+repairing it, which is what the system prompt asks for. But a reviewer
+skimming that file for plausibility would approve a date wrong by two years
+and a total ten cents light. Checking has to mean looking at the document,
+which is why the draft header says so in those words.
 
 **The corpus is private.** Real receipts carry real vendor names, tax ids and
 amounts, and this repository is public. `eval_corpus_dir` defaults to
