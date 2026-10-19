@@ -1,6 +1,9 @@
 # A clean receipt with everything printed. The baseline case: if this one
 # fails, the problem is not a hard document.
 doc_type: receipt
+# Synthetic: the OCR text and the expected values were written together,
+# so these are ground truth by construction rather than by inspection.
+verified: true
 notes: synthetic, invented vendor and tax id
 
 ocr_text: |

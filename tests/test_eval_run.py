@@ -26,6 +26,7 @@ OCR_TEXT = "CAFE SUNRISE\nCIF B12345678\nTICKET 1  03/04/2026\nTOTAL  5,90\nEFEC
 
 LABEL = {
     "doc_type": "receipt",
+    "verified": True,
     "ocr_text": OCR_TEXT,
     "expect": {"total": "5,90", "vendor": "CAFE SUNRISE", "currency": None},
 }
@@ -421,3 +422,173 @@ class TestComparisonOutput:
         assert data["variants"] == ["haiku", "sonnet"]
         assert data["regressions"][0]["field"] == "vendor"
         assert data["accuracy_delta"] < 0
+
+
+class TestTheVerifiedGate:
+    """
+    An unchecked label is not ground truth. Scoring against one lets the
+    model mark its own homework, and the number it produces looks exactly
+    like evidence.
+    """
+
+    def test_an_unverified_label_is_refused(self, seeded, corpus):
+        directory = corpus(a=LABEL | {"verified": False})
+        with pytest.raises(CorpusError, match="not verified"):
+            run_corpus(seeded, directory, extractor=ForbiddenExtractor())
+
+    def test_a_label_with_no_flag_at_all_is_refused(self, seeded, corpus):
+        """Unverified is the default: silence is not sign-off."""
+        unflagged = {k: v for k, v in LABEL.items() if k != "verified"}
+        with pytest.raises(CorpusError, match="not verified"):
+            run_corpus(seeded, corpus(a=unflagged), extractor=ForbiddenExtractor())
+
+    def test_nothing_is_spent_before_the_refusal(self, seeded, corpus):
+        """ForbiddenExtractor raises if called, so this proves no model ran."""
+        with pytest.raises(CorpusError):
+            run_corpus(
+                seeded,
+                corpus(a=LABEL | {"verified": False}),
+                extractor=ForbiddenExtractor(),
+            )
+
+    def test_the_message_names_every_unverified_label(self, seeded, corpus):
+        directory = corpus(a=LABEL | {"verified": False}, b=LABEL | {"verified": False})
+        with pytest.raises(CorpusError) as caught:
+            run_corpus(directory=directory, session=seeded, extractor=ForbiddenExtractor())
+        assert "a" in str(caught.value) and "b" in str(caught.value)
+
+    def test_the_message_says_how_to_fix_it(self, seeded, corpus):
+        with pytest.raises(CorpusError, match="verified: true"):
+            run_corpus(
+                seeded,
+                corpus(a=LABEL | {"verified": False}),
+                extractor=ForbiddenExtractor(),
+            )
+
+    def test_it_can_be_overridden_deliberately(self, seeded, corpus):
+        report = run_corpus(
+            seeded,
+            corpus(a=LABEL | {"verified": False}),
+            extractor=FakeExtractor(ANSWER),
+            include_unverified=True,
+        )
+        assert len(report.documents) == 1
+
+    def test_a_broken_label_is_reported_before_the_verified_gate(self, seeded, corpus):
+        """A malformed label is broken whether or not anyone signed it off."""
+        bad = LABEL | {"verified": False, "expect": {"total": "5,90", "nonsense": 1}}
+        with pytest.raises(CorpusError, match="unknown field"):
+            run_corpus(seeded, corpus(a=bad), extractor=ForbiddenExtractor())
+
+
+class TestDrafting:
+    @pytest.fixture
+    def with_document(self, tmp_path):
+        from .conftest import TINY_PNG
+
+        (tmp_path / "luna-001.png").write_bytes(TINY_PNG)
+        return tmp_path
+
+    def _engine(self):
+        from ocr.base import OcrOutput, TextBlock
+
+        from .conftest import FakeEngine
+
+        return FakeEngine(
+            OcrOutput(
+                full_text=OCR_TEXT,
+                blocks=[TextBlock(text="TOTAL", bbox=(0, 0, 1, 1), confidence=1.0)],
+                mean_confidence=0.99,
+                engine="fake",
+                engine_version="1.0",
+                params={},
+            )
+        )
+
+    def _draft(self, session, directory, answer=None):
+        from evals.run import draft_labels
+
+        return draft_labels(
+            session,
+            directory,
+            extractor=FakeExtractor(answer or ANSWER),
+            engine=self._engine(),
+        )
+
+    def test_it_writes_a_label_beside_the_document(self, seeded, with_document):
+        drafts = self._draft(seeded, with_document)
+
+        assert len(drafts) == 1
+        assert drafts[0].path.name == "luna-001.yaml"
+        assert drafts[0].path.exists()
+
+    def test_the_draft_loads_as_a_label(self, seeded, with_document):
+        self._draft(seeded, with_document)
+        corpus = load_corpus(with_document)
+
+        assert len(corpus) == 1
+        assert corpus[0].label.doc_type == "receipt"
+        assert corpus[0].label.expect["total"] == "5,90"
+
+    def test_it_is_written_unverified(self, seeded, with_document):
+        self._draft(seeded, with_document)
+        assert load_corpus(with_document)[0].label.verified is False
+
+    def test_the_draft_cannot_be_scored_until_checked(self, seeded, with_document):
+        self._draft(seeded, with_document)
+        with pytest.raises(CorpusError, match="not verified"):
+            run_corpus(seeded, with_document, extractor=ForbiddenExtractor())
+
+    def test_the_ocr_text_is_cached_so_rescoring_needs_no_container(
+        self, seeded, with_document
+    ):
+        self._draft(seeded, with_document)
+        assert load_corpus(with_document)[0].label.ocr_text == OCR_TEXT
+
+    def test_money_is_quoted_so_a_human_cannot_break_it(self, seeded, with_document):
+        """Unquoted, YAML reads 8.30 as the float 8.3 and the precision is gone."""
+        self._draft(seeded, with_document, answer=ANSWER | {"total": "5.90"})
+        body = (with_document / "luna-001.yaml").read_text()
+        assert "'5.90'" in body
+
+    def test_the_header_says_what_to_do(self, seeded, with_document):
+        self._draft(seeded, with_document)
+        body = (with_document / "luna-001.yaml").read_text()
+        assert "DRAFT" in body
+        assert "verified: true" in body
+
+    def test_fields_follow_the_document_type_not_the_alphabet(
+        self, seeded, with_document
+    ):
+        """So the file reads like the receipt and can be checked down the page."""
+        self._draft(seeded, with_document)
+        body = (with_document / "luna-001.yaml").read_text()
+        assert body.index("vendor:") < body.index("total:")
+
+    def test_an_existing_label_is_never_overwritten(self, seeded, with_document):
+        """Re-running after correcting half a corpus has to be safe."""
+        (with_document / "luna-001.yaml").write_text(yaml.safe_dump(LABEL))
+
+        with pytest.raises(CorpusError, match="no unlabelled"):
+            self._draft(seeded, with_document)
+
+        assert yaml.safe_load((with_document / "luna-001.yaml").read_text()) == LABEL
+
+    def test_a_document_nothing_routes_to_is_skipped_not_guessed(
+        self, session, with_document
+    ):
+        """No type, no schema: there is nothing to draft against."""
+        drafts = self._draft(session, with_document)  # unseeded database
+        assert drafts == []
+        assert not (with_document / "luna-001.yaml").exists()
+
+    def test_an_empty_directory_says_so(self, seeded, tmp_path):
+        from evals.run import draft_labels
+
+        with pytest.raises(CorpusError, match="no unlabelled"):
+            draft_labels(
+                seeded,
+                tmp_path,
+                extractor=ForbiddenExtractor(),
+                engine=self._engine(),
+            )

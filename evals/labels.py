@@ -65,6 +65,21 @@ class Label(BaseModel):
     #: Anything a human needed to decide. Free text, read by people.
     notes: str | None = None
 
+    #: Whether a human has checked this against the document.
+    #:
+    #: Defaults to False, which is the unhelpful-but-correct default for a
+    #: measuring instrument: a label nobody has checked is not ground truth,
+    #: and scoring against one produces a number that looks like evidence and
+    #: is not. `--draft-labels` writes model output straight into these files,
+    #: so the gap between "a draft" and "the truth" has to be a thing the
+    #: filesystem records rather than a thing you remember.
+    #:
+    #: Checking means reading the document, not reading the draft and finding
+    #: it plausible. The currency invention would survive a plausible-looking
+    #: skim: a Spanish receipt with `currency: EUR` reads fine until you look
+    #: at the page and see no symbol on it.
+    verified: bool = False
+
     @model_validator(mode="after")
     def _needs_something_to_read(self) -> Label:
         if not (self.source or self.ocr_text):

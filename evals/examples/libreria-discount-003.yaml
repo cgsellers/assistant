@@ -2,6 +2,9 @@
 # printed -- so a null here would be a miss, where on the other two a value
 # would be an invention.
 doc_type: receipt
+# Synthetic: the OCR text and the expected values were written together,
+# so these are ground truth by construction rather than by inspection.
+verified: true
 notes: synthetic; DESCUENTO is not a line item; EUR is printed explicitly
 
 ocr_text: |

@@ -28,6 +28,7 @@ from sqlalchemy.orm import Session
 from doctypes import registry
 from doctypes.definition import Definition
 from doctypes.schema import build_json_schema
+from evals import draft
 from evals.labels import LabelledDocument, check_corpus, load_corpus
 from evals.score import Comparison, DocumentScore, Outcome, Report, score_document
 from llm.base import ExtractionError, Extractor
@@ -93,6 +94,7 @@ def run_corpus(
     extractor: Extractor,
     engine=None,
     limit: int | None = None,
+    include_unverified: bool = False,
 ) -> Report:
     """
     Score every labelled document in `directory`.
@@ -103,7 +105,13 @@ def run_corpus(
     getting its fields wrong, because they have different causes and
     different fixes.
     """
-    prepared = prepare(session, directory, engine=engine, limit=limit)
+    prepared = prepare(
+        session,
+        directory,
+        engine=engine,
+        limit=limit,
+        include_unverified=include_unverified,
+    )
     return Report(documents=[_score_prepared(p, extractor) for p in prepared])
 
 
@@ -131,6 +139,7 @@ def prepare(
     *,
     engine=None,
     limit: int | None = None,
+    include_unverified: bool = False,
 ) -> list[Prepared]:
     """
     Load a corpus, refuse it if it has problems, resolve and route every
@@ -152,6 +161,17 @@ def prepare(
         raise CorpusError(
             "the corpus has problems, so nothing was run:\n  " + "\n  ".join(problems)
         )
+
+    if not include_unverified:
+        drafts = [d.name for d in corpus if not d.label.verified]
+        if drafts:
+            raise CorpusError(
+                "these labels are not verified, so scoring against them would be "
+                "marking the model's own homework:\n  "
+                + "\n  ".join(drafts)
+                + "\n\nCheck each against its document, correct what is wrong, then "
+                "set `verified: true`. Pass --include-unverified to score anyway."
+            )
 
     prepared = []
     for document in corpus:
@@ -231,6 +251,7 @@ def compare(
     *,
     engine=None,
     limit: int | None = None,
+    include_unverified: bool = False,
 ) -> Comparison:
     """
     Score one corpus under two variants and diff them.
@@ -242,7 +263,13 @@ def compare(
     if len(variants) != 2:
         raise CorpusError(f"compare takes exactly two variants, got {len(variants)}")
 
-    prepared = prepare(session, directory, engine=engine, limit=limit)
+    prepared = prepare(
+        session,
+        directory,
+        engine=engine,
+        limit=limit,
+        include_unverified=include_unverified,
+    )
     reports = tuple(
         Report(documents=[_score_prepared(p, extractor) for p in prepared])
         for _, extractor in variants
@@ -316,6 +343,65 @@ def format_report(report: Report) -> str:
             lines.append(f"  {name}  {path} = {value!r}")
 
     return "\n".join(lines)
+
+
+def draft_labels(
+    session: Session,
+    directory: Path,
+    *,
+    extractor: Extractor,
+    engine,
+    limit: int | None = None,
+) -> list[draft.Draft]:
+    """
+    Write a label file for every unlabelled document in a corpus.
+
+    Costs one OCR pass and one model call per document, and produces drafts
+    rather than labels -- everything lands `verified: false` and the runner
+    will not score it until a human says otherwise.
+    """
+    pending = draft.unlabelled(directory)
+    if not pending:
+        raise CorpusError(f"no unlabelled documents in {directory}")
+    if limit is not None:
+        pending = pending[:limit]
+
+    drafted = []
+    for path in pending:
+        output = engine.read(path.read_bytes(), _mime_for(path))
+        text = output.full_text
+        match = registry.route(session, text)
+        if match is None:
+            # No type claims it, so there is no schema to draft against. The
+            # document needs a type before it can be labelled, and saying so
+            # is more useful than writing an empty file.
+            log.warning("%s: no document type matched, skipped", path.name)
+            continue
+
+        schema = build_json_schema(match.definition, match.profile)
+        result = extractor.extract(
+            json_schema=schema, text=text, doc_type=match.definition.name
+        )
+        label_path = draft.write(
+            path.with_suffix(".yaml"),
+            draft.build(
+                match.definition,
+                extracted=result.data,
+                ocr_text=text,
+                source=path.name,
+                model=result.model,
+            ),
+        )
+        log.info("drafted %s (%s, $%s)", label_path.name, match.definition.name, result.cost_usd)
+        drafted.append(
+            draft.Draft(
+                name=path.stem,
+                path=label_path,
+                doc_type=match.definition.name,
+                cost_usd=result.cost_usd,
+            )
+        )
+    return drafted
 
 
 def format_comparison(comparison: Comparison) -> str:
@@ -448,6 +534,16 @@ def main() -> None:
     )
     parser.add_argument("--json", action="store_true", help="emit JSON instead of a table")
     parser.add_argument(
+        "--draft-labels",
+        action="store_true",
+        help="write draft labels for unlabelled documents, for you to correct",
+    )
+    parser.add_argument(
+        "--include-unverified",
+        action="store_true",
+        help="score labels nobody has checked; the number means much less",
+    )
+    parser.add_argument(
         "--compare",
         metavar="MODEL",
         default=None,
@@ -484,6 +580,22 @@ def main() -> None:
     extractor = get_extractor(args.model)
     engine = get_engine(args.ocr) if args.ocr else None
 
+    if args.draft_labels:
+        with SessionLocal() as session:
+            drafts = draft_labels(
+                session,
+                directory,
+                extractor=extractor,
+                engine=engine or get_engine(None),
+                limit=args.limit,
+            )
+        total = sum((d.cost_usd for d in drafts if d.cost_usd), start=Decimal("0"))
+        log.info("")
+        log.info("drafted %d label(s) for %s", len(drafts), total and f"${total}" or "free")
+        log.info("Every one says `verified: false`. Check each against its document,")
+        log.info("correct what is wrong, then set `verified: true`.")
+        return
+
     with SessionLocal() as session:
         if args.compare:
             baseline = args.model or get_settings().extraction_model
@@ -496,6 +608,7 @@ def main() -> None:
                 [(baseline, extractor), (args.compare, get_extractor(args.compare))],
                 engine=engine,
                 limit=args.limit,
+                include_unverified=args.include_unverified,
             )
             print(
                 json.dumps(comparison_as_dict(comparison), indent=2)
@@ -505,7 +618,12 @@ def main() -> None:
             return
 
         report = run_corpus(
-            session, directory, extractor=extractor, engine=engine, limit=args.limit
+            session,
+            directory,
+            extractor=extractor,
+            engine=engine,
+            limit=args.limit,
+            include_unverified=args.include_unverified,
         )
 
     if args.json:
