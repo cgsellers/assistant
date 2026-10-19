@@ -253,3 +253,90 @@ class Report:
 def _collapse(path: str) -> str:
     """`line_items[3].amount` -> `line_items[].amount`, so entries aggregate."""
     return re.sub(r"\[\d+\]", "[]", path)
+
+
+@dataclass(frozen=True)
+class Change:
+    """One field whose outcome differed between two runs."""
+
+    document: str
+    path: str
+    before: FieldScore
+    after: FieldScore
+
+    @property
+    def is_regression(self) -> bool:
+        return self.before.passed and not self.after.passed
+
+    @property
+    def is_improvement(self) -> bool:
+        return self.after.passed and not self.before.passed
+
+
+@dataclass(frozen=True)
+class Comparison:
+    """
+    Two runs over the same corpus, and what moved between them.
+
+    The headline number is the least useful part. "Accuracy went up two
+    points" can mean three fields got better and one got worse, and the one
+    that got worse may be the one that matters -- a model that learns to read
+    tax ids and forgets to read totals has not improved. So the regressions
+    are listed individually and by name, and they are listed first.
+    """
+
+    names: tuple[str, str]
+    reports: tuple[Report, Report]
+
+    def _indexed(self, which: int) -> dict[tuple[str, str], FieldScore]:
+        return {
+            (document.name, score.path): score
+            for document in self.reports[which].documents
+            for score in document.fields
+        }
+
+    @property
+    def changes(self) -> list[Change]:
+        """
+        Every field that moved. Fields only one run scored are skipped: that
+        happens when routing differed, which the routing numbers already say
+        and which is not a field-level finding.
+        """
+        before, after = self._indexed(0), self._indexed(1)
+        return [
+            Change(document=key[0], path=key[1], before=before[key], after=after[key])
+            for key in sorted(before.keys() & after.keys())
+            if before[key].outcome is not after[key].outcome
+        ]
+
+    @property
+    def regressions(self) -> list[Change]:
+        return [c for c in self.changes if c.is_regression]
+
+    @property
+    def improvements(self) -> list[Change]:
+        return [c for c in self.changes if c.is_improvement]
+
+    @property
+    def field_deltas(self) -> dict[str, tuple[float, float]]:
+        """field path -> (accuracy before, accuracy after), for every field."""
+        before, after = self.reports[0].field_accuracy, self.reports[1].field_accuracy
+        return {
+            path: (before.get(path, 0.0), after.get(path, 0.0))
+            for path in sorted(before.keys() | after.keys())
+        }
+
+    @property
+    def accuracy_delta(self) -> float:
+        return self.reports[1].accuracy - self.reports[0].accuracy
+
+    @property
+    def cost_ratio(self) -> Decimal | None:
+        """
+        How many times more the second variant cost. None when the first was
+        free, which happens with a fake and would otherwise divide by zero.
+        """
+        first = self.reports[0].total_cost
+        if not first:
+            return None
+        return self.reports[1].total_cost / first

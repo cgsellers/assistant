@@ -20,6 +20,7 @@ import argparse
 import json
 import logging
 from dataclasses import dataclass
+from decimal import Decimal
 from pathlib import Path
 
 from sqlalchemy.orm import Session
@@ -28,7 +29,7 @@ from doctypes import registry
 from doctypes.definition import Definition
 from doctypes.schema import build_json_schema
 from evals.labels import LabelledDocument, check_corpus, load_corpus
-from evals.score import DocumentScore, Outcome, Report, score_document
+from evals.score import Comparison, DocumentScore, Outcome, Report, score_document
 from llm.base import ExtractionError, Extractor
 
 log = logging.getLogger("evals")
@@ -102,6 +103,39 @@ def run_corpus(
     getting its fields wrong, because they have different causes and
     different fixes.
     """
+    prepared = prepare(session, directory, engine=engine, limit=limit)
+    return Report(documents=[_score_prepared(p, extractor) for p in prepared])
+
+
+@dataclass(frozen=True)
+class Prepared:
+    """
+    One document, resolved and routed, ready for a model to look at.
+
+    Preparation is separated from scoring so a comparison run can do it once
+    and hand the *same* text and the *same* routing decision to every variant.
+    Re-resolving per variant would let OCR nondeterminism show up as a
+    difference between models, which is precisely the thing a comparison is
+    supposed to rule out.
+    """
+
+    document: LabelledDocument
+    expected: Definition
+    text: str
+    match: registry.RouteResult | None
+
+
+def prepare(
+    session: Session,
+    directory: Path,
+    *,
+    engine=None,
+    limit: int | None = None,
+) -> list[Prepared]:
+    """
+    Load a corpus, refuse it if it has problems, resolve and route every
+    document. Does everything that costs nothing.
+    """
     corpus = load_corpus(directory)
     if not corpus:
         raise CorpusError(f"no labels found in {directory}")
@@ -119,11 +153,18 @@ def run_corpus(
             "the corpus has problems, so nothing was run:\n  " + "\n  ".join(problems)
         )
 
-    scores = [
-        _score_one(session, document, definitions[document.label.doc_type], extractor, engine)
-        for document in corpus
-    ]
-    return Report(documents=scores)
+    prepared = []
+    for document in corpus:
+        text = resolve_text(document, engine).text
+        prepared.append(
+            Prepared(
+                document=document,
+                expected=definitions[document.label.doc_type],
+                text=text,
+                match=registry.route(session, text),
+            )
+        )
+    return prepared
 
 
 def _definitions_for(
@@ -140,32 +181,23 @@ def _definitions_for(
     return {name: active[name] for name in wanted}
 
 
-def _score_one(
-    session: Session,
-    document: LabelledDocument,
-    definition: Definition,
-    extractor: Extractor,
-    engine,
-) -> DocumentScore:
-    text = resolve_text(document, engine).text
-    match = registry.route(session, text)
+def _score_prepared(prepared: Prepared, extractor: Extractor) -> DocumentScore:
+    document, expected, match = prepared.document, prepared.expected, prepared.match
 
-    if match is None or match.definition.name != definition.name:
+    if match is None or match.definition.name != expected.name:
         # Routed somewhere else, or nowhere. Extracting against the type the
         # label names would measure a pipeline that does not exist, so the
         # document is scored as a routing failure with no fields.
         actual = None if match is None else match.definition.name
-        log.warning("%s routed to %s, expected %s", document.name, actual, definition.name)
+        log.warning("%s routed to %s, expected %s", document.name, actual, expected.name)
         return DocumentScore(
-            name=document.name,
-            expected_type=definition.name,
-            actual_type=actual,
+            name=document.name, expected_type=expected.name, actual_type=actual
         )
 
     schema = build_json_schema(match.definition, match.profile)
     try:
         result = extractor.extract(
-            json_schema=schema, text=text, doc_type=match.definition.name
+            json_schema=schema, text=prepared.text, doc_type=match.definition.name
         )
     except ExtractionError as exc:
         # A failed call is not a scoring question; it is a gap in the run, and
@@ -192,7 +224,43 @@ def _score_one(
     )
 
 
+def compare(
+    session: Session,
+    directory: Path,
+    variants: list[tuple[str, Extractor]],
+    *,
+    engine=None,
+    limit: int | None = None,
+) -> Comparison:
+    """
+    Score one corpus under two variants and diff them.
+
+    Costs one model call per document *per variant*. The corpus is prepared
+    once and shared, so the only thing that differs between the two runs is
+    the thing being compared.
+    """
+    if len(variants) != 2:
+        raise CorpusError(f"compare takes exactly two variants, got {len(variants)}")
+
+    prepared = prepare(session, directory, engine=engine, limit=limit)
+    reports = tuple(
+        Report(documents=[_score_prepared(p, extractor) for p in prepared])
+        for _, extractor in variants
+    )
+    return Comparison(names=(variants[0][0], variants[1][0]), reports=reports)
+
+
 # --- Reporting --------------------------------------------------------------
+
+
+def _usd(value: Decimal) -> str:
+    """
+    Six decimal places, matching the extractions column.
+
+    A per-document average is a division, so it arrives with Decimal's full
+    precision -- $0.006449333333333333333333333333 is accurate and unreadable.
+    """
+    return f"${value.quantize(Decimal('0.000001'))}"
 
 
 def format_report(report: Report) -> str:
@@ -229,8 +297,8 @@ def format_report(report: Report) -> str:
 
     priced = [d for d in documents if d.cost_usd is not None]
     if priced:
-        lines.append(f"cost              ${report.total_cost} total")
-        lines.append(f"                  ${report.cost_per_document} per document")
+        lines.append(f"cost              {_usd(report.total_cost)} total")
+        lines.append(f"                  {_usd(report.cost_per_document)} per document")
     latencies = [d.latency_ms for d in documents if d.latency_ms is not None]
     if latencies:
         lines.append(f"latency           {sum(latencies) // len(latencies)}ms mean")
@@ -250,6 +318,76 @@ def format_report(report: Report) -> str:
     return "\n".join(lines)
 
 
+def format_comparison(comparison: Comparison) -> str:
+    """
+    A diff of two runs, regressions first.
+
+    Regressions lead because they are the finding. An overall number that
+    improved can still hide a field that broke, and the broken field is the
+    one that needs a decision.
+    """
+    before_name, after_name = comparison.names
+    before, after = comparison.reports
+    lines = []
+
+    if comparison.regressions:
+        lines.append(f"REGRESSIONS ({len(comparison.regressions)})")
+        for change in comparison.regressions:
+            lines.append(
+                f"  {change.document}  {change.path}: "
+                f"{change.before.outcome} -> {change.after.outcome}"
+                f"  (expected {change.before.expected!r}, got {change.after.actual!r})"
+            )
+        lines.append("")
+    else:
+        lines.append("no regressions")
+        lines.append("")
+
+    if comparison.improvements:
+        lines.append(f"improvements ({len(comparison.improvements)})")
+        for change in comparison.improvements:
+            lines.append(
+                f"  {change.document}  {change.path}: "
+                f"{change.before.outcome} -> {change.after.outcome}"
+            )
+        lines.append("")
+
+    deltas = comparison.field_deltas
+    width = max((len(p) for p in deltas), default=5)
+    header = (
+        f"{'field'.ljust(width)}  {before_name[:9]:>9}  {after_name[:9]:>9}  delta"
+    )
+    lines.append(header)
+    lines.append("-" * len(header))
+    for path, (was, now) in sorted(deltas.items(), key=lambda kv: kv[1][1] - kv[1][0]):
+        move = now - was
+        marker = "" if abs(move) < 1e-9 else f"{move:+.0%}"
+        lines.append(f"{path.ljust(width)}  {was:>9.0%}  {now:>9.0%}  {marker}")
+    lines.append("-" * len(header))
+    lines.append("")
+
+    lines.append(
+        f"{'field accuracy'.ljust(width)}  {before.accuracy:>9.1%}  "
+        f"{after.accuracy:>9.1%}  {comparison.accuracy_delta:+.1%}"
+    )
+    lines.append(
+        f"{'routing'.ljust(width)}  {before.routing_accuracy:>9.1%}  "
+        f"{after.routing_accuracy:>9.1%}"
+    )
+    lines.append(
+        f"{'cost / doc'.ljust(width)}  {_usd(before.cost_per_document):>9}  "
+        f"{_usd(after.cost_per_document):>9}"
+    )
+    ratio = comparison.cost_ratio
+    if ratio is not None:
+        lines.append("")
+        lines.append(
+            f"{after_name} cost {ratio:.1f}x more and moved field accuracy "
+            f"{comparison.accuracy_delta:+.1%}"
+        )
+    return "\n".join(lines)
+
+
 def report_as_dict(report: Report) -> dict:
     """Machine-readable, for tracking a number across runs."""
     return {
@@ -257,11 +395,40 @@ def report_as_dict(report: Report) -> dict:
         "field_accuracy": round(report.accuracy, 4),
         "routing_accuracy": round(report.routing_accuracy, 4),
         "total_cost_usd": str(report.total_cost),
-        "cost_per_document_usd": str(report.cost_per_document),
+        "cost_per_document_usd": str(
+            report.cost_per_document.quantize(Decimal("0.000001"))
+        ),
         "per_field": {
             path: {outcome.value: count for outcome, count in counts.items()}
             for path, counts in report.field_outcomes.items()
         },
+    }
+
+
+def comparison_as_dict(comparison: Comparison) -> dict:
+    """Machine-readable, for asserting in CI that nothing regressed."""
+    before, after = comparison.reports
+    return {
+        "variants": list(comparison.names),
+        "field_accuracy": [round(before.accuracy, 4), round(after.accuracy, 4)],
+        "accuracy_delta": round(comparison.accuracy_delta, 4),
+        "cost_per_document_usd": [
+            str(before.cost_per_document.quantize(Decimal("0.000001"))),
+            str(after.cost_per_document.quantize(Decimal("0.000001"))),
+        ],
+        "regressions": [
+            {
+                "document": c.document,
+                "field": c.path,
+                "before": c.before.outcome.value,
+                "after": c.after.outcome.value,
+            }
+            for c in comparison.regressions
+        ],
+        "improvements": [
+            {"document": c.document, "field": c.path, "after": c.after.outcome.value}
+            for c in comparison.improvements
+        ],
     }
 
 
@@ -280,6 +447,12 @@ def main() -> None:
         "--dry-run", action="store_true", help="validate the corpus, call nothing"
     )
     parser.add_argument("--json", action="store_true", help="emit JSON instead of a table")
+    parser.add_argument(
+        "--compare",
+        metavar="MODEL",
+        default=None,
+        help="also run the corpus with MODEL and diff the two; doubles the cost",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -312,6 +485,25 @@ def main() -> None:
     engine = get_engine(args.ocr) if args.ocr else None
 
     with SessionLocal() as session:
+        if args.compare:
+            baseline = args.model or get_settings().extraction_model
+            log.info(
+                "comparing %s against %s -- two calls per document", baseline, args.compare
+            )
+            comparison = compare(
+                session,
+                directory,
+                [(baseline, extractor), (args.compare, get_extractor(args.compare))],
+                engine=engine,
+                limit=args.limit,
+            )
+            print(
+                json.dumps(comparison_as_dict(comparison), indent=2)
+                if args.json
+                else format_comparison(comparison)
+            )
+            return
+
         report = run_corpus(
             session, directory, extractor=extractor, engine=engine, limit=args.limit
         )

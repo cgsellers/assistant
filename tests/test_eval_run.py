@@ -277,3 +277,147 @@ class TestFormatting:
 
     def test_an_empty_report_formats_without_crashing(self):
         assert "0 document(s)" in format_report(Report(documents=[]))
+
+
+class TestComparing:
+    """
+    Two variants over one corpus. The guarantee that matters is that nothing
+    except the variant differs between the runs.
+    """
+
+    def _compare(self, session, directory, first: dict, second: dict):
+        from evals.run import compare
+
+        return compare(
+            session,
+            directory,
+            [("baseline", FakeExtractor(first)), ("candidate", FakeExtractor(second))],
+        )
+
+    def test_both_variants_see_the_same_text_and_routing(self, seeded, corpus):
+        """
+        Preparation happens once. If each variant re-resolved the corpus, OCR
+        nondeterminism would show up as a difference between models.
+        """
+        from evals.run import compare, prepare
+
+        directory = corpus(a=LABEL, b=LABEL)
+        prepared = prepare(seeded, directory)
+        first, second = FakeExtractor(ANSWER), FakeExtractor(ANSWER)
+
+        compare(seeded, directory, [("a", first), ("b", second)])
+
+        assert [c["text"] for c in first.calls] == [c["text"] for c in second.calls]
+        assert [p.text for p in prepared] == [c["text"] for c in first.calls]
+
+    def test_it_costs_one_call_per_document_per_variant(self, seeded, corpus):
+        first, second = FakeExtractor(ANSWER), FakeExtractor(ANSWER)
+        from evals.run import compare
+
+        compare(seeded, corpus(a=LABEL, b=LABEL), [("a", first), ("b", second)])
+
+        assert len(first.calls) == 2
+        assert len(second.calls) == 2
+
+    def test_a_field_that_got_worse_is_a_regression(self, seeded, corpus):
+        comparison = self._compare(
+            seeded, corpus(), ANSWER, ANSWER | {"vendor": "SOMEWHERE ELSE"}
+        )
+
+        assert len(comparison.regressions) == 1
+        assert comparison.regressions[0].path == "vendor"
+        assert comparison.regressions[0].is_regression is True
+        assert comparison.improvements == []
+
+    def test_a_field_that_got_better_is_an_improvement(self, seeded, corpus):
+        comparison = self._compare(
+            seeded, corpus(), ANSWER | {"vendor": "WRONG"}, ANSWER
+        )
+
+        assert len(comparison.improvements) == 1
+        assert comparison.improvements[0].path == "vendor"
+        assert comparison.regressions == []
+
+    def test_a_change_between_two_failures_is_neither(self, seeded, corpus):
+        """missed -> wrong is movement, but not progress; it must not read as one."""
+        comparison = self._compare(
+            seeded,
+            corpus(),
+            ANSWER | {"vendor": None},        # missed
+            ANSWER | {"vendor": "WRONG"},     # wrong
+        )
+
+        assert len(comparison.changes) == 1
+        assert comparison.regressions == []
+        assert comparison.improvements == []
+
+    def test_identical_variants_show_no_changes(self, seeded, corpus):
+        comparison = self._compare(seeded, corpus(a=LABEL, b=LABEL), ANSWER, ANSWER)
+
+        assert comparison.changes == []
+        assert comparison.accuracy_delta == 0.0
+
+    def test_the_accuracy_delta_is_signed(self, seeded, corpus):
+        worse = self._compare(seeded, corpus(), ANSWER, ANSWER | {"vendor": "X"})
+        better = self._compare(seeded, corpus(), ANSWER | {"vendor": "X"}, ANSWER)
+
+        assert worse.accuracy_delta < 0
+        assert better.accuracy_delta > 0
+
+    def test_field_deltas_cover_every_field(self, seeded, corpus):
+        comparison = self._compare(seeded, corpus(), ANSWER, ANSWER)
+        assert "vendor" in comparison.field_deltas
+        assert comparison.field_deltas["vendor"] == (1.0, 1.0)
+
+    def test_it_refuses_anything_other_than_two_variants(self, seeded, corpus):
+        from evals.run import compare
+
+        with pytest.raises(CorpusError, match="exactly two"):
+            compare(seeded, corpus(), [("only", FakeExtractor(ANSWER))])
+
+
+class TestComparisonOutput:
+    def _comparison(self, session, directory, first, second):
+        from evals.run import compare
+
+        return compare(
+            session,
+            directory,
+            [("haiku", FakeExtractor(first)), ("sonnet", FakeExtractor(second))],
+        )
+
+    def test_regressions_lead_the_report(self, seeded, corpus):
+        """An improved headline can hide a broken field; the field comes first."""
+        from evals.run import format_comparison
+
+        text = format_comparison(
+            self._comparison(seeded, corpus(), ANSWER, ANSWER | {"vendor": "X"})
+        )
+        assert text.startswith("REGRESSIONS")
+        assert "vendor" in text.splitlines()[1]
+
+    def test_a_clean_run_says_so(self, seeded, corpus):
+        from evals.run import format_comparison
+
+        text = format_comparison(self._comparison(seeded, corpus(), ANSWER, ANSWER))
+        assert text.startswith("no regressions")
+
+    def test_cost_is_quantized_not_a_raw_decimal(self, seeded, corpus):
+        """A per-document average is a division; its full precision is unreadable."""
+        from evals.run import format_comparison
+
+        text = format_comparison(
+            self._comparison(seeded, corpus(a=LABEL, b=LABEL, c=LABEL), ANSWER, ANSWER)
+        )
+        assert "0.001205" in text
+        assert "33333" not in text
+
+    def test_json_lists_regressions_for_ci(self, seeded, corpus):
+        from evals.run import comparison_as_dict
+
+        data = comparison_as_dict(
+            self._comparison(seeded, corpus(), ANSWER, ANSWER | {"vendor": "X"})
+        )
+        assert data["variants"] == ["haiku", "sonnet"]
+        assert data["regressions"][0]["field"] == "vendor"
+        assert data["accuracy_delta"] < 0
