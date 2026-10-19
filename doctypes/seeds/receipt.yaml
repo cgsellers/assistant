@@ -140,6 +140,19 @@ rules:
     tolerance: 0.02
     message: base plus IVA should equal the total
 
+# How a receipt becomes a row in the ledger. Only the fields the canonical
+# layer has: everything else stays in extractions.raw_json, which is the
+# point of keeping a raw layer. Nothing here is inferred -- a receipt that
+# prints no currency produces a null currency, not a guess.
+canonical:
+  direction: out          # a purchase: money leaving
+  amount: total
+  tax_amount: tax_amount
+  occurred_on: issued_on
+  counterparty: vendor
+  counterparty_tax_id: tax_id
+  currency: currency
+
 # Not included, and why: a line_items_sum rule. Whether the printed line
 # prices already include IVA varies by till -- some receipts have the items
 # summing to the subtotal, others to the total -- so the rule would fail on

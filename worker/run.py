@@ -28,6 +28,8 @@ from core.db import SessionLocal
 from core.models import Document, DocumentEvent, Job, OcrResult, utcnow
 from core.status import DocStatus, JobKind, JobStatus
 from doctypes import registry
+from doctypes.canonical import to_ledger
+from doctypes.definition import Definition
 from doctypes.schema import build_json_schema
 from doctypes.validate import validate
 from llm import get_extractor
@@ -303,10 +305,11 @@ def run_extract_job(session: Session, job: Job, extractor: Extractor) -> None:
 
     # raw_json stores what the model actually returned, not the coerced values:
     # Decimal and date do not survive a JSON column, and the raw answer is the
-    # evidence an eval run has to score against.
-    _, errors = validate(definition, result.data)
+    # evidence an eval run has to score against. The coerced values are what
+    # the ledger is built from, which is why both come back here.
+    coerced, errors = validate(definition, result.data)
 
-    repository.record_extraction(
+    extraction = repository.record_extraction(
         session,
         document_id=document.id,
         doc_type=definition.name,
@@ -339,15 +342,64 @@ def run_extract_job(session: Session, job: Job, extractor: Extractor) -> None:
         _record_transition(
             session, document, DocStatus.NEEDS_REVIEW, {"validation_errors": errors}
         )
-    else:
-        _record_transition(session, document, DocStatus.VALIDATED, None)
+        job.status = JobStatus.DONE
+        job.last_error = None
+        session.commit()
+        log.info(
+            "extract done document=%s type=%s v%d errors=%d cost=$%s",
+            document.id[:8], definition.name, definition.version, len(errors),
+            result.cost_usd,
+        )
+        return
+
+    _record_transition(session, document, DocStatus.VALIDATED, None)
+    session.commit()
+
+    _commit_to_ledger(session, document, definition, extraction, coerced)
 
     job.status = JobStatus.DONE
     job.last_error = None
     session.commit()
     log.info(
-        "extract done document=%s type=%s v%d errors=%d cost=$%s",
-        document.id[:8], definition.name, definition.version, len(errors), result.cost_usd,
+        "extract done document=%s type=%s v%d status=%s cost=$%s",
+        document.id[:8], definition.name, definition.version, document.status,
+        result.cost_usd,
+    )
+
+
+def _commit_to_ledger(
+    session: Session,
+    document: Document,
+    definition: Definition,
+    extraction,
+    coerced: dict,
+) -> None:
+    """
+    Write the canonical row, or record why the document stops at `validated`.
+
+    Not every validated document reaches the ledger, and that is not a
+    failure: a document type with no `canonical` mapping is one an analyst is
+    still shaping. Stopping with the reason in the audit trail is more useful
+    than inventing a row or failing the job.
+    """
+    values, reason = to_ledger(definition, coerced)
+    if values is None:
+        log.info("document=%s stays validated: %s", document.id[:8], reason)
+        return
+
+    transaction = repository.record_transaction(
+        session, extraction=extraction, values=values
+    )
+    _record_transition(
+        session,
+        document,
+        DocStatus.COMMITTED,
+        {
+            "transaction_id": transaction.id,
+            "amount": str(transaction.amount),
+            "currency": transaction.currency,
+            "direction": transaction.direction,
+        },
     )
 
 

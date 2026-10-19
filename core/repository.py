@@ -21,6 +21,7 @@ from core.models import (
     Extraction,
     Job,
     OcrResult,
+    Transaction,
 )
 from core.status import DocStatus, JobKind
 from doctypes.definition import Definition
@@ -258,3 +259,51 @@ def record_extraction(
     session.add(extraction)
     session.commit()
     return extraction
+
+
+def record_transaction(
+    session: Session,
+    *,
+    extraction: Extraction,
+    values: dict,
+) -> Transaction:
+    """
+    Write a document's ledger row, superseding any earlier one.
+
+    One live row per document, not per extraction. A retry or a correction
+    produces a new extraction and therefore a new row; the old one is demoted
+    in the same transaction rather than deleted, so the history survives and
+    `SELECT SUM(amount) ... WHERE is_current` is the obvious correct query. A
+    ledger that double-counts a re-run receipt is worse than one that is
+    merely incomplete.
+    """
+    if isinstance(values.get("amount"), float):
+        raise TypeError("amount must be a Decimal, not a float")
+
+    session.execute(
+        update(Transaction)
+        .where(
+            Transaction.document_id == extraction.document_id,
+            Transaction.is_current.is_(True),
+        )
+        .values(is_current=False)
+    )
+
+    transaction = Transaction(
+        source_extraction_id=extraction.id,
+        document_id=extraction.document_id,
+        **values,
+    )
+    session.add(transaction)
+    session.commit()
+    return transaction
+
+
+def current_transaction(session: Session, document_id: str) -> Transaction | None:
+    """The ledger row that counts for this document, if it has reached one."""
+    return session.scalar(
+        select(Transaction).where(
+            Transaction.document_id == document_id,
+            Transaction.is_current.is_(True),
+        )
+    )

@@ -306,3 +306,138 @@ class TestDispatch:
                 assert job.status == JobStatus.FAILED
                 return
         raise AssertionError("the unknown job was never claimed")
+
+
+CANONICAL = {
+    "direction": "out",
+    "amount": "total",
+    "occurred_on": "issued_on",
+    "counterparty": "vendor",
+}
+
+
+def _ledger_receipt():
+    """The receipt type, plus the mapping that lets it reach the ledger."""
+    return receipt_definition(
+        fields={
+            "total": {"type": "money", "description": "The total.", "required": True},
+            "vendor": {"type": "string", "description": "The vendor."},
+            "issued_on": {"type": "date", "description": "The date."},
+        },
+        canonical=CANONICAL,
+    )
+
+
+class TestReachingTheLedger:
+    """
+    `committed` was unreachable until the mapper existed: a document's best
+    possible ending was `validated`, one step short of the thing the README
+    opens by promising.
+    """
+
+    def test_a_validated_document_is_committed_to_the_ledger(self, session, ready):
+        repository.create_document_type_version(session, _ledger_receipt())
+        document, _ = ready()
+
+        worker.run_extract_job(
+            session,
+            claim_extract(session),
+            FakeExtractor({"total": "9,35", "vendor": "CAFE LUNA", "issued_on": "2026-05-12"}),
+        )
+
+        session.refresh(document)
+        assert document.status == DocStatus.COMMITTED
+        assert [e.to_status for e in document.events][-4:] == [
+            "classified",
+            "extracted",
+            "validated",
+            "committed",
+        ]
+
+    def test_the_row_is_typed_and_traceable(self, session, ready):
+        from datetime import date
+        from decimal import Decimal
+
+        repository.create_document_type_version(session, _ledger_receipt())
+        document, _ = ready()
+        worker.run_extract_job(
+            session,
+            claim_extract(session),
+            FakeExtractor({"total": "9,35", "vendor": "CAFE LUNA", "issued_on": "2026-05-12"}),
+        )
+
+        row = repository.current_transaction(session, document.id)
+        assert row.amount == Decimal("9.3500")
+        assert isinstance(row.amount, Decimal)
+        assert row.occurred_on == date(2026, 5, 12)
+        assert row.counterparty == "CAFE LUNA"
+        assert row.direction == "out"
+        assert row.source_type == "receipt"
+        # Every figure traces back to the words on a page.
+        assert row.extraction.raw_json["total"] == "9,35"
+
+    def test_the_commit_event_records_what_was_written(self, session, ready):
+        repository.create_document_type_version(session, _ledger_receipt())
+        document, _ = ready()
+        worker.run_extract_job(
+            session, claim_extract(session), FakeExtractor({"total": "9,35"})
+        )
+
+        session.refresh(document)
+        detail = document.events[-1].detail
+        # As extracted, not as stored: the column is Numeric(14, 4) and reads
+        # back 9.3500, but the audit note records the figure that was read.
+        assert detail["amount"] == "9.35"
+        assert detail["direction"] == "out"
+        assert detail["transaction_id"]
+
+    def test_a_type_without_a_mapping_stops_at_validated(self, session, ready):
+        """Not a failure: a type an analyst is still shaping has no ledger row."""
+        repository.create_document_type_version(session, receipt_definition())
+        document, _ = ready()
+
+        worker.run_extract_job(
+            session, claim_extract(session), FakeExtractor({"total": "9,35"})
+        )
+
+        session.refresh(document)
+        assert document.status == DocStatus.VALIDATED
+        assert repository.current_transaction(session, document.id) is None
+
+    def test_a_document_in_review_never_reaches_the_ledger(self, session, ready):
+        repository.create_document_type_version(session, _ledger_receipt())
+        document, _ = ready()
+
+        # Negative total trips the `positive` rule.
+        worker.run_extract_job(
+            session, claim_extract(session), FakeExtractor({"total": "-9,35"})
+        )
+
+        session.refresh(document)
+        assert document.status == DocStatus.NEEDS_REVIEW
+        assert repository.current_transaction(session, document.id) is None
+
+    def test_re_extracting_supersedes_the_ledger_row_rather_than_adding_one(
+        self, session, ready
+    ):
+        from decimal import Decimal
+
+        from core.models import Transaction
+
+        repository.create_document_type_version(session, _ledger_receipt())
+        document, _ = ready()
+
+        worker.run_extract_job(
+            session, claim_extract(session), FakeExtractor({"total": "9,35"})
+        )
+        session.add(Job(kind=JobKind.EXTRACT, document_id=document.id))
+        session.commit()
+        worker.run_extract_job(
+            session, claim_extract(session), FakeExtractor({"total": "9,99"})
+        )
+
+        live = session.query(Transaction).filter_by(is_current=True).all()
+        assert len(live) == 1
+        assert live[0].amount == Decimal("9.9900")
+        # And the superseded row is kept, because the history is the point.
+        assert session.query(Transaction).count() == 2
