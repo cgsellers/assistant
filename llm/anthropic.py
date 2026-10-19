@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from decimal import Decimal
 
@@ -34,6 +35,13 @@ PRICING: dict[str, tuple[str, str, str]] = {
 
 DEFAULT_MODEL = "claude-haiku-4-5"
 
+#: The API answers with a dated id ("claude-haiku-4-5-20251001") where the
+#: request named an alias ("claude-haiku-4-5"), and the dated one is what gets
+#: stored on extractions.model_used. Stripping the suffix is what lets a
+#: stored row be re-priced later; without it the lookup misses and the answer
+#: is a silent $0, which is worse than an error because it still sums.
+_DATE_SUFFIX = re.compile(r"-\d{8}$")
+
 # Extraction output is small even with line items; this is headroom, not a
 # target. Well under the streaming threshold, so a plain request is fine.
 MAX_TOKENS = 4096
@@ -52,11 +60,26 @@ Rules:
 """
 
 
+def pricing_key(model: str) -> str | None:
+    """
+    The PRICING entry for a model id, whether or not it carries a date.
+
+    Only an exact `-YYYYMMDD` suffix is stripped, rather than matching on any
+    prefix: a future "claude-haiku-4-5-mini" would be a different model at a
+    different price, and should miss rather than quietly borrow these rates.
+    """
+    if model in PRICING:
+        return model
+    stripped = _DATE_SUFFIX.sub("", model)
+    return stripped if stripped in PRICING else None
+
+
 def price(model: str, usage) -> Decimal:
     """Cost of one call, in USD, as an exact Decimal."""
-    if model not in PRICING:
+    key = pricing_key(model)
+    if key is None:
         return Decimal("0")
-    per_in, per_out, per_cache = (Decimal(p) for p in PRICING[model])
+    per_in, per_out, per_cache = (Decimal(p) for p in PRICING[key])
     million = Decimal("1000000")
     cached = Decimal(getattr(usage, "cache_read_input_tokens", 0) or 0)
     return (

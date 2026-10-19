@@ -17,6 +17,7 @@ from llm.anthropic import (
     SYSTEM_PROMPT,
     AnthropicExtractor,
     price,
+    pricing_key,
 )
 from llm.base import ExtractionError, ExtractionRefused, ExtractionResult, Extractor
 
@@ -408,3 +409,51 @@ class TestPermanentFailures:
         response = make_response(stop_reason="refusal", content=[])
         with pytest.raises(ExtractionRefused, match="declined"):
             extract_with(FakeAnthropic(response))
+
+
+class TestDatedModelIds:
+    """
+    The API answers with a dated id where the request named an alias, and the
+    dated one is what lands on extractions.model_used. If that cannot be
+    priced, re-pricing a stored row returns $0 -- which is worse than raising,
+    because it still sums into a cost report that then reads as free.
+    """
+
+    def test_an_alias_resolves_to_itself(self):
+        assert pricing_key("claude-haiku-4-5") == "claude-haiku-4-5"
+
+    def test_a_dated_id_resolves_to_its_alias(self):
+        assert pricing_key("claude-haiku-4-5-20251001") == "claude-haiku-4-5"
+
+    def test_every_pricing_entry_survives_a_date_suffix(self):
+        for alias in PRICING:
+            assert pricing_key(f"{alias}-20260101") == alias
+
+    def test_a_dated_id_prices_the_same_as_its_alias(self):
+        usage = SimpleNamespace(
+            input_tokens=1981, output_tokens=150, cache_read_input_tokens=0
+        )
+        assert price("claude-haiku-4-5-20251001", usage) == price(
+            "claude-haiku-4-5", usage
+        )
+
+    def test_the_figure_matches_the_observed_live_call(self):
+        """1,981 in and 150 out at $1/$5 per MTok, as actually billed."""
+        usage = SimpleNamespace(
+            input_tokens=1981, output_tokens=150, cache_read_input_tokens=0
+        )
+        assert price("claude-haiku-4-5-20251001", usage) == Decimal("0.002731")
+
+    def test_a_different_model_sharing_a_prefix_is_not_resolved(self):
+        """A hypothetical -mini is a different model; it must miss, not borrow."""
+        assert pricing_key("claude-haiku-4-5-mini") is None
+
+    def test_a_malformed_suffix_is_not_stripped(self):
+        assert pricing_key("claude-haiku-4-5-2025") is None
+        assert pricing_key("claude-haiku-4-5-202510011") is None
+
+    def test_an_unknown_model_still_prices_at_zero_rather_than_raising(self):
+        usage = SimpleNamespace(
+            input_tokens=10, output_tokens=10, cache_read_input_tokens=0
+        )
+        assert price("some-other-provider/model", usage) == Decimal("0")
