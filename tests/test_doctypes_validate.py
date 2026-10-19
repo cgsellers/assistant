@@ -281,8 +281,10 @@ class TestListCoercion:
 
     def test_an_absent_item_field_is_null_not_an_error(self):
         """
-        build_json_schema does not nullable-wrap inside `items`, so an optional
-        item field may simply not come back.
+        The schema now asks for every item key, nullable where optional, so an
+        absent one should not happen. Coercion stays tolerant of it anyway:
+        rows extracted before that fix are still in the table, and reprocessing
+        reads them back.
         """
         data, errors = coerce(self.definition, {"line_items": [{"amount": "3,60"}]})
         assert errors == []

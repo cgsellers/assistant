@@ -28,6 +28,7 @@ _JSON_TYPE: dict[FieldType, dict] = {
 
 
 def _field_schema(spec: FieldSpec, description: str) -> dict:
+    """The bare fragment for a field, before the optional-means-nullable rule."""
     if spec.type is FieldType.LIST:
         assert spec.item_fields is not None  # guaranteed by Definition
         return {
@@ -36,10 +37,12 @@ def _field_schema(spec: FieldSpec, description: str) -> dict:
             "items": {
                 "type": "object",
                 "properties": {
-                    name: _field_schema(item, item.description)
+                    name: _property_schema(item, item.description)
                     for name, item in spec.item_fields.items()
                 },
-                "required": [n for n, i in spec.item_fields.items() if i.required],
+                # Every item key present, optional ones nullable -- the same
+                # rule as the top level, for the same reason.
+                "required": list(spec.item_fields),
                 "additionalProperties": False,
             },
         }
@@ -51,6 +54,31 @@ def _field_schema(spec: FieldSpec, description: str) -> dict:
     return fragment
 
 
+def _property_schema(spec: FieldSpec, description: str) -> dict:
+    """
+    One property, with the optional-means-nullable rule applied.
+
+    The rule lives here rather than at the call site so that it reaches list
+    item fields as well as top-level ones. It did not, once: an optional item
+    field was merely absent from the entry's `required` list, so the model was
+    free to omit the key entirely -- and did -- while every optional top-level
+    field came back as an explicit null. Two shapes for one idea, and the
+    difference only showed up in a live call.
+
+    Lists are exempt, at either level: "no items" is `[]`, and nothing
+    downstream wants to tell that apart from null.
+    """
+    fragment = _field_schema(spec, description)
+    if spec.required or spec.type is FieldType.LIST:
+        return fragment
+
+    # The description goes on the property, not on both branches of the
+    # anyOf. A duplicate says nothing new and is paid for on every call --
+    # field descriptions are already most of the input tokens.
+    inner = {k: v for k, v in fragment.items() if k != "description"}
+    return {"anyOf": [inner, {"type": "null"}], "description": description}
+
+
 def build_json_schema(definition: Definition, profile: Profile | None = None) -> dict:
     """
     The schema sent to the model, with this issuer's description overrides
@@ -58,20 +86,15 @@ def build_json_schema(definition: Definition, profile: Profile | None = None) ->
 
     Optional fields are nullable rather than absent from `required`: structured
     outputs want every key present, and an explicit null is a clearer signal
-    than a missing key ("I looked and it was not there" vs "I forgot").
+    than a missing key ("I looked and it was not there" vs "I forgot"). That
+    applies inside list items too -- see `_property_schema`.
     """
     overrides = profile.descriptions if profile else {}
     properties: dict[str, dict] = {}
 
     for name, spec in definition.fields.items():
         description = overrides.get(name, spec.description)
-        fragment = _field_schema(spec, description)
-        if not spec.required and spec.type is not FieldType.LIST:
-            fragment = {
-                "anyOf": [fragment, {"type": "null"}],
-                "description": description,
-            }
-        properties[name] = fragment
+        properties[name] = _property_schema(spec, description)
 
     return {
         "type": "object",
