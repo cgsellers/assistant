@@ -17,6 +17,12 @@ class Settings(BaseSettings):
     # harness has to run the same documents through different tiers.
     extraction_model: str = "claude-haiku-4-5"
 
+    # Labelled receipts for the eval harness. Under data/ because that is
+    # already gitignored: real receipts carry real vendor names, tax ids and
+    # amounts, and this repo is public. Synthetic examples live in
+    # evals/examples/ and are committed.
+    eval_corpus_dir: Path = Path("./data/evals")
+
     database_url: str = "sqlite:///./data/ledgerline.db"
     storage_dir: Path = Path("./data/files")
     ocr_service_url: str = "http://localhost:8001"

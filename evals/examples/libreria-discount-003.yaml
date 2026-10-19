@@ -1,0 +1,33 @@
+# Two traps. A discount line that is not a purchase, and a currency that IS
+# printed -- so a null here would be a miss, where on the other two a value
+# would be an invention.
+doc_type: receipt
+notes: synthetic; DESCUENTO is not a line item; EUR is printed explicitly
+
+ocr_text: |
+  LIBRERIA EL FARO S.L.
+  Calle Larga 88, 11201 Algeciras
+  NIF 87654321X
+  Fecha: 21/02/2026   17:05
+  Cuaderno A5               3,50
+  Boligrafo azul            1,20
+  2 x Sobre kraft           0,90
+  DESCUENTO -10%           -0,56
+  BASE                      4,17
+  IVA 21%                   0,87
+  TOTAL EUR                 5,04
+  VISA ************4417
+
+expect:
+  vendor: LIBRERIA EL FARO S.L.
+  tax_id: 87654321X
+  issued_on: 2026-02-21
+  subtotal: '4,17'
+  tax_amount: '0,87'
+  total: '5,04'
+  currency: EUR             # printed on the TOTAL line
+  payment_method: card      # VISA
+  line_items:
+    - {name: Cuaderno A5, amount: '3,50'}
+    - {name: Boligrafo azul, amount: '1,20'}
+    - {name: Sobre kraft, quantity: 2, amount: '0,90'}

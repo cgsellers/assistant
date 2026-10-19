@@ -1,0 +1,33 @@
+# A clean receipt with everything printed. The baseline case: if this one
+# fails, the problem is not a hard document.
+doc_type: receipt
+notes: synthetic, invented vendor and tax id
+
+ocr_text: |
+  CAFETERIA SUNRISE
+  Avda. del Puerto 3, 46022 Valencia
+  CIF: B12345678
+  TICKET 00417        03/04/2026  09:18
+  Cafe solo                 1,40
+  Croissant                 1,90
+  Zumo natural              2,60
+  BASE IMPONIBLE            5,36
+  IVA 10%                   0,54
+  TOTAL                     5,90
+  EFECTIVO                  6,00
+  CAMBIO                    0,10
+  Gracias por su visita
+
+expect:
+  vendor: CAFETERIA SUNRISE
+  tax_id: B12345678
+  issued_on: 2026-04-03
+  subtotal: '5,36'
+  tax_amount: '0,54'
+  total: '5,90'
+  currency: null            # no symbol or code anywhere on the ticket
+  payment_method: cash      # EFECTIVO
+  line_items:
+    - {name: Cafe solo, amount: '1,40'}
+    - {name: Croissant, amount: '1,90'}
+    - {name: Zumo natural, amount: '2,60'}
