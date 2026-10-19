@@ -633,7 +633,7 @@ not currently in scope.
 Python 3.12.14 · FastAPI 0.141.1 · SQLAlchemy 2.0.52 · Pydantic 2.13.5 · Alembic 1.20.0
 anthropic 1.5.0
 Migration 6823df7fd6b2 (head, applied) · alembic check: no drift · ruff: clean
-pytest: 418 passed in 2.1s (128 phase 1 · 290 phase 2)
+pytest: 496 passed in 2.3s (128 phase 1 · 290 phase 2 · 78 phase 3)
 ```
 
 ### 7.4 Phase 1 checklist
@@ -757,6 +757,73 @@ not reasoning — the answer is on the page — so thinking would buy latency an
 a task whose difficulty is reading. Worth revisiting only if the eval harness shows the
 cheap tier failing on documents where the arithmetic, not the reading, is what is hard.
 
+### 7.6 Phase 3 in progress — the eval harness
+
+The harness exists; the corpus does not. That ordering is deliberate: the
+measuring instrument should be trustworthy before it produces a number anyone
+acts on, and it is testable without a single real receipt.
+
+| Module | Provides |
+|---|---|
+| `evals/labels.py` | The label format and loader, plus `check` -- a corpus is validated before a run starts, because every document costs a model call |
+| `evals/score.py` | Per-field scoring, the five outcomes, and aggregation across a run |
+| `evals/run.py` | The runner and the report, `python -m evals.run` |
+| `evals/examples/` | Three synthetic labelled receipts, committed |
+
+**The unit is a field, not a document.** "87% of documents were perfect" hides
+which field is costing the 13%, and per-type schemas exist precisely because
+fields fail independently: a vendor name that is nearly always right and a tax
+id that is nearly always wrong are two problems with two different fixes.
+
+**Five outcomes, because "wrong" is not one thing.** `correct`, `absent_ok`,
+`missed`, `hallucinated`, `wrong`. The pair that earns its keep is `missed`
+versus `hallucinated`. A missed field is a description that needs to point
+harder at the page. A hallucinated one is a model answering from the world
+rather than from the document, which no description fixes and which a finance
+system cannot tolerate quietly -- an invented tax id is indistinguishable from
+a real one downstream.
+
+Both sides are coerced through the same code the pipeline uses, so `'7,15'`
+and `'7.15'` and `7.15` are one value and a label never has to guess which
+spelling the model will choose. Case and stretched whitespace are forgiven;
+accents are not, because a different letter is a different answer.
+
+**Routing is exercised, not bypassed.** The label says which type a document
+should be and the registry is allowed to disagree. A misrouted document is
+scored as a routing failure with no fields, and routing accuracy is reported
+separately -- it has a different cause and a different fix from a field being
+wrong.
+
+**The corpus is private.** Real receipts carry real vendor names, tax ids and
+amounts, and this repository is public. `eval_corpus_dir` defaults to
+`data/evals/`, which is already gitignored. The three examples in
+`evals/examples/` are synthetic and committed, so the format is documented and
+the runner is demonstrable without anyone's real data.
+
+**First run, against those three examples:**
+
+```
+field accuracy    97.7%        routing accuracy  100.0%
+cost              $0.002171 per document        latency  1523ms mean
+
+invented values (the document said nothing):
+  cafe-sunrise-001  currency = 'EUR'
+```
+
+**That is not a baseline and should not be quoted as one.** Three synthetic
+documents, written by the same person who wrote the field descriptions, is a
+proof that the instrument works -- nothing more. It does establish one thing
+worth having: the currency invention from 7.5 is now reproducible on demand
+and attached to a named document, rather than being a thing that happened once.
+
+Of the two example receipts that print no currency, one was invented for and
+one was not. The sparse till roll was answered `null` correctly; the full
+Spanish ticket was answered `EUR`. A plausible reading is that the surrounding
+Spanish context is doing the inferring, which would mean the fix is a
+description that names the absence rather than a stricter prompt -- but two
+documents cannot distinguish that from chance, which is exactly why the real
+corpus has to come before the fix.
+
 ---
 
 ## 8. Known gaps and deferred work
@@ -857,7 +924,7 @@ redaction before analyst context, and authentication — there is currently no a
 |---|---|---|
 | 1 | Upload → dedup → OCR → stored text; status tracking; event log | Backend fundamentals, idempotency |
 | **2** | Document types as data + `receipt`: routing, schema-enforced extraction, validator, mapper | Core pipeline end to end |
-| 3 | Eval harness on labeled receipts; per-field accuracy and cost per document | Measurement before optimisation |
+| **3** | Eval harness on labeled receipts; per-field accuracy and cost per document | Measurement before optimisation |
 | 4 | Vision fallback escalation, review queue with corrections, `invoice` type | Cost engineering, human-in-the-loop |
 | 5 | LangGraph: batch fan-out, conditional edges, interrupt/resume at review, reprocessing | Orchestration where justified |
 | 6 | Template-as-code: model generates per-vendor parsers in a sandbox, verified before promotion | Removing the model from the hot path |

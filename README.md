@@ -6,10 +6,11 @@ Upload receipts and invoices. Local OCR reads them, deterministic routing picks 
 
 The design principle: **models only where perception or judgment is required.** Everything else is code that can be unit-tested and never hallucinates.
 
-> Status: **phases 1 and 2 complete**. Upload, dedup, OCR, routing, schema-enforced
-> extraction and validation run end to end under 418 tests, with a `receipt` type
-> shipped in the repo. A real receipt extracts every field correctly for ~$0.003. Next
-> is the eval harness (phase 3), which turns that single anecdote into a measurement.
+> Status: **phases 1 and 2 complete · phase 3 in progress**. Upload, dedup, OCR,
+> routing, schema-enforced extraction and validation run end to end under 496 tests,
+> with a `receipt` type shipped in the repo. The eval harness scores a labelled corpus
+> per field and reports cost per document; the corpus itself is still being gathered,
+> so there are no accuracy numbers worth quoting yet.
 
 > **[Technical design & decision record](docs/DESIGN.md)** — architecture, the full
 > decision log with rejected alternatives, measured results, deviations from the original
@@ -349,7 +350,7 @@ Lint and tests:
 
 ```bash
 uv run ruff check .
-uv run pytest              # 418 tests, ~2s; no container, tesseract, network or API key
+uv run pytest              # 496 tests, ~2s; no container, tesseract, network or API key
 ```
 
 Full `docker compose up` instructions land with the OCR container, later in phase 1.
