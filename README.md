@@ -7,8 +7,8 @@ Upload receipts and invoices. Local OCR reads them, deterministic routing picks 
 The design principle: **models only where perception or judgment is required.** Everything else is code that can be unit-tested and never hallucinates.
 
 > Status: **phases 1 and 2 complete · phase 3 in progress**. Upload, dedup, OCR,
-> routing, schema-enforced extraction and validation run end to end under 509 tests,
-> with a `receipt` type shipped in the repo. The eval harness scores a labelled corpus
+> routing, schema-enforced extraction, validation and the canonical ledger run end to
+> end under 543 tests, with a `receipt` type shipped in the repo. The eval harness scores a labelled corpus
 > per field and reports cost per document; the corpus itself is still being gathered,
 > so there are no accuracy numbers worth quoting yet.
 
@@ -193,6 +193,7 @@ erDiagram
     TRANSACTIONS {
         uuid id PK
         uuid source_extraction_id FK
+        uuid document_id FK
         string source_type
         date occurred_on
         string counterparty
@@ -203,6 +204,7 @@ erDiagram
         string currency
         string category
         bool user_verified
+        bool is_current
     }
     OUTBOX {
         uuid id PK
@@ -215,8 +217,8 @@ erDiagram
 ```
 
 `documents`, `ocr_results`, `document_events` and `jobs` shipped in phase 1;
-`document_types` and `extractions` are phase 2, and their migration is applied. The
-canonical tables — `transactions`, `outbox` — land in phase 8. `jobs` is the queue: a
+`document_types`, `extractions` and `transactions` are phase 2. `outbox` lands in
+phase 8. `jobs` is the queue: a
 worker claims a row, so there is no broker to run.
 
 There are no per-document-type tables. `extractions.raw_json` **is** the typed layer: a
@@ -295,6 +297,23 @@ escape hatch in code review rather than in the database.
 Money is `Decimal`, never `float`. It crosses the wire as a string for exactly that
 reason.
 
+A type also says how it reaches the ledger, in the same file:
+
+```yaml
+canonical:
+  direction: out          # a purchase: money leaving
+  amount: total
+  tax_amount: tax_amount
+  occurred_on: issued_on
+  counterparty: vendor
+```
+
+Only the fields the canonical layer has — everything else stays in
+`extractions.raw_json`, which is what the raw layer is for. The mapping is data for the
+same reason the rest of the definition is: a mapper written per type is a module per
+type. A type with no `canonical` block is extracted and validated and simply stops
+short of the ledger, which is right for one an analyst is still shaping.
+
 ## Roadmap
 
 | Phase | Ships | Demonstrates |
@@ -350,7 +369,7 @@ Lint and tests:
 
 ```bash
 uv run ruff check .
-uv run pytest              # 509 tests, ~2s; no container, tesseract, network or API key
+uv run pytest              # 543 tests, ~3s; no container, tesseract, network or API key
 ```
 
 Full `docker compose up` instructions land with the OCR container, later in phase 1.

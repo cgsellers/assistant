@@ -111,7 +111,8 @@ Plus `document_events` (audit), `jobs` (queue), `review_items`, `outbox`, and
 `runs`/`steps` for per-model-call cost tracking.
 
 **Built so far:** `documents`, `ocr_results`, `document_events`, `jobs` (phase 1);
-`document_types`, `extractions` (phase 2, migration applied). Everything else is later.
+`document_types`, `extractions`, `transactions` (phase 2). `outbox`, `review_items` and
+`runs`/`steps` are later.
 
 The typed layer is JSON rather than per-document-type tables — see 5.20 for why, and
 what that costs.
@@ -472,6 +473,34 @@ per-issuer description overrides — and one generic processor interprets all of
   extraction silently. This is precisely what the phase-3 eval harness exists to catch,
   and it is the strongest argument for building it before anything is scaled up.
 
+### 5.21 The canonical mapping is data too
+
+A validated extraction has to become a row in `transactions`, and the obvious way to
+write that is a function per document type -- `map_to_rows(data) -> Transaction`. That
+is the design 5.20 rejected one layer up, and it fails here for the same reason: an
+analyst adding a document type through the UI cannot ship Python.
+
+So the mapping is a block in the definition. `canonical.amount: total` says which field
+holds the amount, and one generic mapper reads it.
+
+Two things fall out of that choice. The references are **validated against the field
+set at authoring time**, including their types -- `canonical.amount` pointing at a
+string field is rejected when the definition is saved, not on the first document that
+reaches the ledger. And a type with **no** `canonical` block is extracted and validated
+and then stops, which is the correct behaviour for a type someone is still shaping
+rather than an error to handle.
+
+`direction` is a constant rather than a field reference, because it is a property of
+the type and not of the document: every purchase receipt is money leaving. A type that
+could genuinely be either way round wants to be two types.
+
+**What the ledger deliberately does not do is infer.** A receipt that prints no
+currency produces a null currency, not EUR-because-it-is-Spanish. A currency field
+holding "Euros" is dropped rather than mangled into three characters. The raw answer
+is in `extractions.raw_json` either way, and the value of a canonical table is that
+everything in it was read off a page -- which is also what makes the analyst agent's
+citations worth anything.
+
 ---
 
 ## 6. Deviations from the original plan
@@ -633,7 +662,7 @@ not currently in scope.
 Python 3.12.14 · FastAPI 0.141.1 · SQLAlchemy 2.0.52 · Pydantic 2.13.5 · Alembic 1.20.0
 anthropic 1.5.0
 Migration 6823df7fd6b2 (head, applied) · alembic check: no drift · ruff: clean
-pytest: 509 passed in 2.4s (128 phase 1 · 290 phase 2 · 91 phase 3)
+pytest: 543 passed in 2.7s (128 phase 1 · 324 phase 2 · 91 phase 3)
 ```
 
 ### 7.4 Phase 1 checklist
@@ -676,6 +705,7 @@ Remaining before the phase-2 loop closes:
 [x] tests for doctypes/ and llm/ — 219 of them
 [x] worker wiring — `extract` is a second job kind, 21 more tests
 [x] a seeded `receipt` definition shipped with the repo
+[x] the mapper and `transactions` -- `committed` is reachable
 ```
 
 **The loop closes.** A real worker process, against a real API, on a seeded Spanish cafe
