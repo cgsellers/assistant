@@ -7,7 +7,7 @@ Upload receipts and invoices. Local OCR reads them, deterministic routing picks 
 The design principle: **models only where perception or judgment is required.** Everything else is code that can be unit-tested and never hallucinates.
 
 > Status: **phases 1 and 2 complete · phase 3 in progress**. Upload, dedup, OCR,
-> routing, schema-enforced extraction and validation run end to end under 496 tests,
+> routing, schema-enforced extraction and validation run end to end under 509 tests,
 > with a `receipt` type shipped in the repo. The eval harness scores a labelled corpus
 > per field and reports cost per document; the corpus itself is still being gathered,
 > so there are no accuracy numbers worth quoting yet.
@@ -20,7 +20,7 @@ The design principle: **models only where perception or judgment is required.** 
 
 Most "AI finance assistant" projects put a model in the loop for everything and can't tell you how accurate they are or what a document costs to process. This project is built the other way round:
 
-- Extraction accuracy is **measured per field, per document type, per model tier** on a labeled set
+- Extraction accuracy is **measured per field, per document type, per model tier** on a labeled set — `python -m evals.run --compare claude-sonnet-5` scores one corpus under two models and leads with what got worse
 - Most documents never touch an expensive model — cheap extraction first, escalation only when deterministic validation fails
 - Every model call is recorded with tokens, cost, and latency
 - The analyst never does arithmetic; it calls deterministic tools over a canonical ledger and cites source documents
@@ -350,7 +350,7 @@ Lint and tests:
 
 ```bash
 uv run ruff check .
-uv run pytest              # 496 tests, ~2s; no container, tesseract, network or API key
+uv run pytest              # 509 tests, ~2s; no container, tesseract, network or API key
 ```
 
 Full `docker compose up` instructions land with the OCR container, later in phase 1.

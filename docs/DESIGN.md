@@ -633,7 +633,7 @@ not currently in scope.
 Python 3.12.14 · FastAPI 0.141.1 · SQLAlchemy 2.0.52 · Pydantic 2.13.5 · Alembic 1.20.0
 anthropic 1.5.0
 Migration 6823df7fd6b2 (head, applied) · alembic check: no drift · ruff: clean
-pytest: 496 passed in 2.3s (128 phase 1 · 290 phase 2 · 78 phase 3)
+pytest: 509 passed in 2.4s (128 phase 1 · 290 phase 2 · 91 phase 3)
 ```
 
 ### 7.4 Phase 1 checklist
@@ -767,7 +767,7 @@ acts on, and it is testable without a single real receipt.
 |---|---|
 | `evals/labels.py` | The label format and loader, plus `check` -- a corpus is validated before a run starts, because every document costs a model call |
 | `evals/score.py` | Per-field scoring, the five outcomes, and aggregation across a run |
-| `evals/run.py` | The runner and the report, `python -m evals.run` |
+| `evals/run.py` | The runner, the report, and `--compare`; `python -m evals.run` |
 | `evals/examples/` | Three synthetic labelled receipts, committed |
 
 **The unit is a field, not a document.** "87% of documents were perfect" hides
@@ -794,6 +794,18 @@ scored as a routing failure with no fields, and routing accuracy is reported
 separately -- it has a different cause and a different fix from a field being
 wrong.
 
+**Comparing two variants is the point, not a feature.** A single number says
+nothing actionable; the question is always "did this change help". `--compare`
+runs one corpus under two models and diffs them, and the report leads with
+regressions rather than the headline, because an overall figure that improved
+can still hide a field that broke -- a model that learns to read tax ids and
+forgets to read totals has not improved.
+
+The corpus is prepared once and shared between variants: text is resolved and
+routing decided before either model is called. Re-resolving per variant would
+let OCR nondeterminism surface as a difference between models, which is
+exactly what a comparison is supposed to rule out.
+
 **The corpus is private.** Real receipts carry real vendor names, tax ids and
 amounts, and this repository is public. `eval_corpus_dir` defaults to
 `data/evals/`, which is already gitignored. The three examples in
@@ -815,6 +827,24 @@ documents, written by the same person who wrote the field descriptions, is a
 proof that the instrument works -- nothing more. It does establish one thing
 worth having: the currency invention from 7.5 is now reproducible on demand
 and attached to a named document, rather than being a thing that happened once.
+
+**First comparison, Haiku 4.5 against Sonnet 5 over the same three examples:**
+
+```
+no regressions
+field accuracy      97.7%      97.7%   +0.0%
+cost / doc      $0.002171  $0.006449
+
+claude-sonnet-5 cost 3.0x more and moved field accuracy +0.0%
+```
+
+Again: three synthetic documents prove the instrument, not the tiers. But one
+detail is worth more than the tie. Sonnet made *the same* currency invention
+on *the same* receipt. If the stronger model fails identically, the cause is
+unlikely to be capability -- which points at the description or the prompt
+rather than at the tier, and makes escalating to a stronger model a poor fix
+for this particular failure. That is the shape of conclusion the harness is
+supposed to produce, and it is unavailable from a single run at a single tier.
 
 Of the two example receipts that print no currency, one was invented for and
 one was not. The sparse till roll was answered `null` correctly; the full
