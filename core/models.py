@@ -99,7 +99,7 @@ class Base(DeclarativeBase):
 
 class Document(Base):
     """One uploaded file. `sha256` is the dedup key: a repeat upload of
-    identical bytes is marked `duplicate` rather than processed again."""
+    identical bytes returns this same row and queues no further work."""
 
     __tablename__ = "documents"
 

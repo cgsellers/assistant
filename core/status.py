@@ -17,7 +17,6 @@ class DocStatus(StrEnum):
 
     # Phase 1 — ingestion
     UPLOADED = "uploaded"
-    DUPLICATE = "duplicate"
     OCR_DONE = "ocr_done"
     OCR_FAILED = "ocr_failed"
 

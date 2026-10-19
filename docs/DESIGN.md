@@ -130,7 +130,7 @@ to query regardless of how many document types exist.
 ### Document lifecycle
 
 Each document has exactly one status; every transition appends a row to
-`document_events`. States: `uploaded`, `duplicate`, `ocr_done`, `ocr_failed`,
+`document_events`. States: `uploaded`, `ocr_done`, `ocr_failed`,
 `classified`, `unsupported`, `extracted`, `validated`, `needs_review`, `rejected`,
 `committed`, `synced`, `reprocessing`.
 
@@ -633,7 +633,7 @@ not currently in scope.
 Python 3.12.14 · FastAPI 0.141.1 · SQLAlchemy 2.0.52 · Pydantic 2.13.5 · Alembic 1.20.0
 anthropic 1.5.0
 Migration 6823df7fd6b2 (head, applied) · alembic check: no drift · ruff: clean
-pytest: 386 passed in 2.0s (128 phase 1 · 258 phase 2)
+pytest: 418 passed in 2.1s (128 phase 1 · 290 phase 2)
 ```
 
 ### 7.4 Phase 1 checklist
@@ -695,20 +695,22 @@ twelve-line Spanish till roll: `classified -> extracted -> validated`, nine fiel
 three line items all correct, five rules passed, $0.002731 over 1,981 input and 150
 output tokens in 4.3s.
 
-Three things that run showed, all of them phase 3's business:
+Three things that run showed. Two have since been fixed; the third is phase 3's:
 
 - **The descriptions are most of the input cost.** Input went from 922 tokens to 1,981
   between the throwaway definition and the shipped one, for the same receipt. The field
   descriptions are the prompt, so writing them better and writing them longer are the
-  same action, and only measurement separates the two.
-- **The model inferred a currency the receipt does not state.** Nothing in the text
-  carries a symbol or code, the description says "Null if nothing on the receipt says",
-  and the system prompt says never infer -- and it answered `EUR` from the fact that the
-  receipt is Spanish. Defensible, probably even wanted, but it is not what was asked
-  for, and the only way to know how often that happens is to count it.
-- **Optional list item fields come back absent, not null.** Two of the three line items
-  have no `quantity` key at all, which is the `build_json_schema` inconsistency noted
-  above showing up in practice rather than in theory.
+  same action, and only measurement separates the two. Deduplicating descriptions across
+  the `anyOf` branches has since taken it to 1,667, but the shape of the problem stands.
+- **The model inferred a currency the receipt does not state.** *Still open.* Nothing in
+  the text carries a symbol or code, the description says "Null if nothing on the receipt
+  says", and the system prompt says never infer -- and it answered `EUR`, from the fact
+  that the receipt is Spanish. Defensible, probably even wanted, but it is not what was
+  asked for. Tightening the description is a guess at a fix; counting how often it
+  happens is the eval harness's job, which is where this one waits.
+- ~~**Optional list item fields come back absent, not null.**~~ Fixed, and confirmed on a
+  second live call: all three line items now carry a `quantity` key. Cost fell from
+  $0.002731 to $0.002312 for the same receipt in the same pass.
 
 Two correctness traps the tests pinned, both worth knowing about:
 
@@ -740,12 +742,10 @@ Three things that call surfaced, none of them blocking:
 - **Money arrives with the separator as printed** (`"7,15"`, `"1,80"`), exactly as the
   system prompt asks. The comma-to-period normalisation in the coercion layer is
   load-bearing, not defensive.
-- **List item fields are optional in a way top-level fields are not.** `build_json_schema`
-  wraps an optional top-level field as `anyOf: [T, null]` and keeps it in `required`, on
-  the reasoning that an explicit null beats a missing key. It does not apply that
-  treatment inside `items`, so an item field without `required: true` is simply absent
-  from the entry's `required` list and may not come back at all. The inconsistency is
-  worth settling before the eval harness starts measuring per-field accuracy.
+- ~~**List item fields are optional in a way top-level fields are not.**~~ Fixed. The
+  nullable rule now lives in one function that both the top level and `items` go
+  through, so it cannot drift apart again. Deduplicating the description across the two
+  `anyOf` branches while in there took 366 tokens off every call -- 27% of the schema.
 - **`format: "date"` quietly demands inference.** The receipt printed `12/05/2026` and the
   model returned `2026-05-12`. Right for Spain, wrong for the identical receipt issued in
   the US — and it sits awkwardly beside the system prompt's "never infer, calculate, or
@@ -810,13 +810,15 @@ healthy, every real request 500s. The fix is to compare `alembic_version` agains
 head revision the code expects. Deferred deliberately — it becomes load-bearing at phase
 5, when schema bumps drive `reprocessing`.
 
-**8.3 `DocStatus.DUPLICATE` is unused.** Because `sha256` is `UNIQUE`, a repeat upload
-cannot create a second row, so the API returns the original with `duplicate: true` in the
-response instead. But the README state machine specifies `uploaded --> duplicate`, which
-implies a row holding that status. Unresolved inconsistency: either drop the status and
-correct the README, or drop the unique constraint so repeats create rows marked
-`duplicate`. Current preference is to drop the status, since the audit trail belongs in
-`document_events`.
+**8.3 ~~`DocStatus.DUPLICATE` is unused~~ — resolved by dropping it.** Because `sha256`
+is `UNIQUE`, a repeat upload cannot create a second row, so no document could ever hold
+the status. The alternative was to drop the unique constraint and let repeats create
+rows marked `duplicate`, which trades a structural guarantee for a status nobody reads.
+
+A duplicate upload is an *event*, not a state: the API returns the original with
+`duplicate: true`, and what happened is already in `document_events`. The status is gone
+from `DocStatus` and from the README state machine, which no longer promises a state the
+schema cannot produce.
 
 **8.4 ~~No PDF support~~ — resolved.** The OCR container rasterises PDFs with
 `pypdfium2` at 200 DPI, capped at 20 pages. Tesseract still refuses PDFs by design, since
@@ -834,7 +836,7 @@ lunch**. Catching that requires comparison after extraction (same vendor, total,
 tax ID → probable duplicate → review queue). Phase 4, and a genuinely different mechanism
 from what exists.
 
-**8.7 Cost tracking is built, and exercised once.** `extractions` carries `input_tokens`,
+**8.7 Cost tracking is built, and exercised.** `extractions` carries `input_tokens`,
 `output_tokens`, `cache_read_tokens`, `cost_usd` and `latency_ms`, and
 `AnthropicExtractor` populates all five, and the arithmetic now reconciles exactly
 against a live call — $0.001205 for one receipt (7.5). `cost_usd` is `Numeric(12, 6)`

@@ -7,7 +7,7 @@ Upload receipts and invoices. Local OCR reads them, deterministic routing picks 
 The design principle: **models only where perception or judgment is required.** Everything else is code that can be unit-tested and never hallucinates.
 
 > Status: **phases 1 and 2 complete**. Upload, dedup, OCR, routing, schema-enforced
-> extraction and validation run end to end under 386 tests, with a `receipt` type
+> extraction and validation run end to end under 418 tests, with a `receipt` type
 > shipped in the repo. A real receipt extracts every field correctly for ~$0.003. Next
 > is the eval harness (phase 3), which turns that single anecdote into a measurement.
 
@@ -89,7 +89,6 @@ Every document has exactly one status. Every transition is logged to `document_e
 ```mermaid
 stateDiagram-v2
     [*] --> uploaded
-    uploaded --> duplicate : sha256 seen before
     uploaded --> ocr_done : OCR succeeds
     uploaded --> ocr_failed : unreadable
     ocr_done --> classified : pattern match or classifier
@@ -350,7 +349,7 @@ Lint and tests:
 
 ```bash
 uv run ruff check .
-uv run pytest              # 386 tests, ~2s; no container, tesseract, network or API key
+uv run pytest              # 418 tests, ~2s; no container, tesseract, network or API key
 ```
 
 Full `docker compose up` instructions land with the OCR container, later in phase 1.
