@@ -23,7 +23,7 @@ from datetime import timedelta
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from core import repository, storage
+from core import money, repository, storage
 from core.db import SessionLocal
 from core.models import Document, DocumentEvent, Job, OcrResult, utcnow
 from core.status import DocStatus, JobKind, JobStatus
@@ -329,7 +329,7 @@ def run_extract_job(session: Session, job: Job, extractor: Extractor) -> None:
         session, document, DocStatus.EXTRACTED,
         {
             "model": result.model,
-            "cost_usd": str(result.cost_usd),
+            "cost_usd": money.to_str(result.cost_usd),
             "input_tokens": result.input_tokens,
             "output_tokens": result.output_tokens,
             "latency_ms": result.latency_ms,
@@ -396,7 +396,7 @@ def _commit_to_ledger(
         DocStatus.COMMITTED,
         {
             "transaction_id": transaction.id,
-            "amount": str(transaction.amount),
+            "amount": money.to_str(transaction.amount),
             "currency": transaction.currency,
             "direction": transaction.direction,
         },

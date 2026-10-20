@@ -385,11 +385,29 @@ class TestReachingTheLedger:
 
         session.refresh(document)
         detail = document.events[-1].detail
-        # As extracted, not as stored: the column is Numeric(14, 4) and reads
-        # back 9.3500, but the audit note records the figure that was read.
         assert detail["amount"] == "9.35"
         assert detail["direction"] == "out"
         assert detail["transaction_id"]
+
+    def test_the_event_and_the_column_agree(self, session, ready):
+        """
+        They did not, once. The column is Numeric(14, 4) and read back
+        9.3500 while the audit note said 9.35 -- the same number, two
+        spellings, and a trail that did not obviously match the table it
+        described. core.money is now the single rule, applied on the way out
+        of the database as well as into the event.
+        """
+        repository.create_document_type_version(session, _ledger_receipt())
+        document, _ = ready()
+        worker.run_extract_job(
+            session, claim_extract(session), FakeExtractor({"total": "9,35"})
+        )
+
+        session.expire_all()  # force a real read back through the column
+        row = repository.current_transaction(session, document.id)
+        detail = session.get(type(document), document.id).events[-1].detail
+
+        assert str(row.amount) == detail["amount"] == "9.35"
 
     def test_a_type_without_a_mapping_stops_at_validated(self, session, ready):
         """Not a failure: a type an analyst is still shaping has no ledger row."""

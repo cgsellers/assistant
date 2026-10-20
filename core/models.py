@@ -31,6 +31,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
+from core.money import normalise
 from core.status import DocStatus, JobStatus
 
 # Without this, SQLAlchemy lets the database invent names for indexes, unique
@@ -92,6 +93,31 @@ def new_id() -> str:
 def utcnow() -> datetime:
     """Timezone-aware UTC. Naive datetimes in a finance system are a bug waiting."""
     return datetime.now(UTC)
+
+
+class Money(TypeDecorator):
+    """
+    A Decimal that reads back the way it was written.
+
+    `Numeric(14, 4)` is the right column -- two places would truncate the
+    currencies that use three -- but it means a value written as `10.00`
+    returns as `10.0000`. Identical numbers, two spellings, and everything
+    downstream that renders one produces inconsistent output: an audit trail
+    saying `9.35` beside a ledger row saying `9.3500`.
+
+    Exactly the shape of problem `UTCDateTime` solves for datetimes (5.9), so
+    exactly the same answer: normalise at the boundary, once, rather than
+    asking every caller to remember. `core.money.normalise` holds the rule.
+
+    No DDL change -- the column is still Numeric(14, 4), and `render_item` in
+    alembic/env.py already emits the impl rather than this class.
+    """
+
+    impl = Numeric
+    cache_ok = True
+
+    def process_result_value(self, value, dialect):
+        return None if value is None else normalise(value)
 
 
 class Base(DeclarativeBase):
@@ -368,8 +394,8 @@ class Transaction(Base):
     # places today, but that is a property of the money pattern in
     # doctypes.schema rather than of money, and currencies with three exist.
     # Four costs nothing and removes a silent rounding trap.
-    amount: Mapped[Decimal] = mapped_column(Numeric(14, 4))
-    tax_amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
+    amount: Mapped[Decimal] = mapped_column(Money(14, 4))
+    tax_amount: Mapped[Decimal | None] = mapped_column(Money(14, 4))
     #: Null when the document does not say. Not guessed: a receipt printed in
     #: Spain is usually EUR and "usually" has no place in a ledger.
     currency: Mapped[str | None] = mapped_column(String(3))
