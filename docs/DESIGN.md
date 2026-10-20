@@ -662,7 +662,7 @@ not currently in scope.
 Python 3.12.14 · FastAPI 0.141.1 · SQLAlchemy 2.0.52 · Pydantic 2.13.5 · Alembic 1.20.0
 anthropic 1.5.0
 Migration 6823df7fd6b2 (head, applied) · alembic check: no drift · ruff: clean
-pytest: 561 passed in 3.0s (128 phase 1 · 324 phase 2 · 109 phase 3)
+pytest: 620 passed in 3.7s (128 phase 1 · 324 phase 2 · 109 phase 3 · 59 phase 7)
 ```
 
 ### 7.4 Phase 1 checklist
@@ -915,6 +915,113 @@ description that names the absence rather than a stricter prompt -- but two
 documents cannot distinguish that from chance, which is exactly why the real
 corpus has to come before the fix.
 
+### 7.7 Phase 7 — the analyst agent
+
+Taken out of order. It was blocked on `transactions`, which arrived with the
+ledger, and unlike everything in phase 3 or 4 it needs no labelled corpus.
+
+| Module | Provides |
+|---|---|
+| `analyst/tools.py` | Six read-only queries over the ledger, and the arithmetic |
+| `analyst/agent.py` | The loop, the tool schemas, and the system prompt |
+
+**The model never does arithmetic.** That is the whole claim. A model asked
+"what did I spend at Mercadona" that answers from figures in its context will
+occasionally be wrong, and wrong invisibly -- the answer reads exactly like a
+correct one. So the sums happen in `analyst/tools.py` under test, and the
+model's contribution is choosing the tool and saying the answer.
+
+**Read-only is a capability, not a rule.** There is no tool that writes, so
+"requires human approval" is not an instruction the model is asked to honour
+-- it is something it cannot do. A test asserts that running every tool
+leaves the table byte-identical, and another rejects any future tool whose
+name suggests a write. The agent can describe a change; applying one is a
+separate call a person makes.
+
+**Totals never cross currencies.** `8.30 EUR` and `8.30 USD` cannot become
+`16.60` of nothing, so a total comes back split by currency and a mixed
+result carries a note saying not to add it up. Rows whose currency the
+document never stated get their own bucket rather than being folded into the
+majority -- the same refusal to infer that the mapper makes in 5.21.
+
+**Citations come off the tool results, not the prose.** The model can
+misreport a document id; it cannot invent one into `Answer.sources`, because
+those are collected from what the tools returned.
+
+**The loop is written out rather than delegated** to the SDK's tool runner.
+Forty lines, no beta dependency, and being able to read exactly what is sent
+is worth more here than the lines it saves: this is the part of the system a
+reviewer will want to audit. A failing tool is reported back to the model as
+an error result rather than swallowed, because dropping it leaves the model
+waiting for an answer that never comes.
+
+**A live run, five transactions in three currencies:**
+
+```
+Q: What did I spend in total?
+
+   Split by currency since they can't be combined:
+   - EUR: 66.65 (3 transactions)
+   - USD: 95.00 (1 transaction)
+   - Unstated currency: 12.00 (1 transaction -- the document didn't specify)
+
+   tools: ledger_summary -> total_spend    cites: 5 documents    $0.014
+```
+
+It oriented itself before querying, refused to combine the currencies, gave
+the unstated one its own line, and cited every document. A second question
+fired three tools in one turn and drilled into individual rows. Both sums
+were computed in SQL.
+
+### Two bugs, and why the fixes are not where the bugs were
+
+Both were the same shape: an implicit contract across a module boundary,
+enforced by nothing. Neither was a logic error -- in each case one module
+produced a shape and another assumed a different one. So both were fixed at
+the contract rather than at the instance.
+
+**Citations could be injected.** `get_source` nested the document id one
+level down, so a drill-down returned an answer citing nothing. Patching that
+one field would have missed the real problem: citations were recovered by
+walking tool payloads for keys named `document_id` or `sources`, and
+`get_source` embeds `extraction.raw_json`. A document type may declare any
+`^[a-z][a-z0-9_]{0,48}$` field name, so **content read off an uploaded page
+could put entries into the provenance list** -- demonstrated, three ids
+collected where one was real. That is the single property the agent exists to
+guarantee, failing on the only input the system treats as untrusted.
+
+The fix is a typed `ToolResult`: a payload for the model, and the document
+ids stated separately by each tool. The walker is deleted. Adding a tool now
+means deciding what its sources are rather than hoping they are found, and
+`get_source` takes the id off the row rather than out of the payload.
+
+**The same amount had three spellings.** `Numeric(14, 4)` reads back
+`10.0000` where the mapper wrote `10.00`; the analyst quantised to two
+places; the worker called `str()` and got whichever it held. So
+`document_events` recorded `"9.35"` for a row holding `9.3500` -- the same
+number, and an audit trail that did not obviously match the table it
+described. That one was noticed during the ledger work and papered over with
+a test comment, which was the wrong call.
+
+The fix is a `Money` TypeDecorator over `Numeric`, normalising on the way out
+of the database, plus one `core.money.to_str` that every caller uses. This is
+the problem `UTCDateTime` already solved for datetimes in 5.9 -- a type that
+does not round-trip cleanly -- and `render_item` in `alembic/env.py` was
+written for exactly this case, its docstring naming a `core.models.Money`
+that did not exist until now. No migration: the column is unchanged.
+
+**What this says about the tests.** Both bugs were caught by tests written
+alongside the feature -- but caught because those particular behaviours
+happened to get a test. The citation bug surfaced only because drill-down
+citations were tested specifically, and the injection variant was found later
+still, by asking what else the walker would match. More tests is not the
+defence. A dataclass with a `document_ids` field cannot be quietly wrong
+about where its ids came from.
+
+Not built: persistent chat. `ask()` keeps history inside one call, which is
+the part that has to be right first -- one question producing one auditable
+set of tool calls. Sessions are a thin layer on top and belong with the UI.
+
 ---
 
 ## 8. Known gaps and deferred work
@@ -1019,7 +1126,7 @@ redaction before analyst context, and authentication — there is currently no a
 | 4 | Vision fallback escalation, review queue with corrections, `invoice` type | Cost engineering, human-in-the-loop |
 | 5 | LangGraph: batch fan-out, conditional edges, interrupt/resume at review, reprocessing | Orchestration where justified |
 | 6 | Template-as-code: model generates per-vendor parsers in a sandbox, verified before promotion | Removing the model from the hot path |
-| 7 | Analyst agent over `transactions`: read-only tools, citations, approval gate | Agent design as a data consumer |
+| **7** | Analyst agent over `transactions`: read-only tools, citations, approval gate | Agent design as a data consumer |
 | 8 | Outbox + integrations (CSV, then accounting API); UI | Production shape |
 
 Phase 3 deliberately precedes phase 5 — see 5.18.

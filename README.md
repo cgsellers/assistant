@@ -6,11 +6,12 @@ Upload receipts and invoices. Local OCR reads them, deterministic routing picks 
 
 The design principle: **models only where perception or judgment is required.** Everything else is code that can be unit-tested and never hallucinates.
 
-> Status: **phases 1 and 2 complete · phase 3 in progress**. Upload, dedup, OCR,
+> Status: **phases 1, 2 and 7 complete · phase 3 in progress**. Upload, dedup, OCR,
 > routing, schema-enforced extraction, validation and the canonical ledger run end to
-> end under 561 tests, with a `receipt` type shipped in the repo. The eval harness scores a labelled corpus
-> per field and reports cost per document; the corpus itself is still being gathered,
-> so there are no accuracy numbers worth quoting yet.
+> end under 620 tests, with a `receipt` type shipped in the repo, and a read-only
+> analyst agent answers questions over the ledger with citations. The eval harness
+> scores a labelled corpus per field and reports cost per document — but the corpus is
+> still being gathered, so there are **no accuracy numbers worth quoting yet**.
 
 > **[Technical design & decision record](docs/DESIGN.md)** — architecture, the full
 > decision log with rejected alternatives, measured results, deviations from the original
@@ -23,7 +24,7 @@ Most "AI finance assistant" projects put a model in the loop for everything and 
 - Extraction accuracy is **measured per field, per document type, per model tier** on a labeled set — `python -m evals.run --compare claude-sonnet-5` scores one corpus under two models and leads with what got worse
 - Most documents never touch an expensive model — cheap extraction first, escalation only when deterministic validation fails
 - Every model call is recorded with tokens, cost, and latency
-- The analyst never does arithmetic; it calls deterministic tools over a canonical ledger and cites source documents
+- The analyst never does arithmetic; it calls deterministic tools over a canonical ledger and cites source documents — and because every tool is a read, "requires approval" is a capability it lacks rather than a rule it follows
 - Anything that writes state requires human approval
 
 ## Architecture
@@ -369,7 +370,7 @@ Lint and tests:
 
 ```bash
 uv run ruff check .
-uv run pytest              # 561 tests, ~3s; no container, tesseract, network or API key
+uv run pytest              # 620 tests, ~4s; no container, tesseract, network or API key
 ```
 
 Measuring extraction against a labelled corpus:
