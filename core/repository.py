@@ -307,3 +307,53 @@ def current_transaction(session: Session, document_id: str) -> Transaction | Non
             Transaction.is_current.is_(True),
         )
     )
+
+
+def record_failed_attempt(
+    session: Session,
+    *,
+    document_id: str,
+    doc_type: str,
+    schema_version: int,
+    reason: str,
+    spent,
+    profile: str | None = None,
+) -> Extraction:
+    """
+    Record a model call that was billed but produced nothing usable.
+
+    A refusal or a max_tokens truncation is an HTTP 200 with a full usage
+    block: it costs the same as a success. Without a row, that spend vanishes
+    from every cost report -- and the calls that bought nothing are exactly
+    the ones a cost report most needs to show.
+
+    Written with `is_current=False` and no `raw_json`, so it is counted for
+    cost and attempts but can never replace a document's real answer, and it
+    does not demote whatever extraction is currently live.
+    """
+    highest = session.scalar(
+        select(func.max(Extraction.attempt)).where(
+            Extraction.document_id == document_id,
+            Extraction.is_trial.is_(False),
+        )
+    )
+    row = Extraction(
+        document_id=document_id,
+        doc_type=doc_type,
+        schema_version=schema_version,
+        profile=profile,
+        attempt=(highest or 0) + 1,
+        model_used=spent.model,
+        raw_json=None,
+        validation_errors=[f"failed: {reason}"],
+        is_current=False,
+        is_trial=False,
+        input_tokens=spent.input_tokens,
+        output_tokens=spent.output_tokens,
+        cache_read_tokens=spent.cache_read_tokens,
+        cost_usd=spent.cost_usd,
+        latency_ms=spent.latency_ms,
+    )
+    session.add(row)
+    session.commit()
+    return row

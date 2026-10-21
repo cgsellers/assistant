@@ -292,15 +292,30 @@ def run_extract_job(session: Session, job: Job, extractor: Extractor) -> None:
         result = extractor.extract(
             json_schema=schema, text=text, doc_type=definition.name
         )
-    except ExtractionRefused as exc:
-        # Permanent for these bytes: a refusal or a truncation reproduces.
-        _fail_permanently(
-            session, job, document, str(exc),
-            kind="refused", status=DocStatus.NEEDS_REVIEW,
-        )
-        return
     except ExtractionError as exc:
-        _fail_or_retry(session, job, document, str(exc), status=DocStatus.NEEDS_REVIEW)
+        # Recorded before deciding what happens next, because the call may
+        # have been billed whatever the outcome. `spent` is None when nothing
+        # reached the model, and then there is nothing to record.
+        if exc.spent is not None:
+            repository.record_failed_attempt(
+                session,
+                document_id=document.id,
+                doc_type=definition.name,
+                schema_version=definition.version,
+                reason=str(exc),
+                spent=exc.spent,
+                profile=match.profile_key,
+            )
+        if isinstance(exc, ExtractionRefused):
+            # Permanent for these bytes: a refusal or a truncation reproduces.
+            _fail_permanently(
+                session, job, document, str(exc),
+                kind="refused", status=DocStatus.NEEDS_REVIEW,
+            )
+        else:
+            _fail_or_retry(
+                session, job, document, str(exc), status=DocStatus.NEEDS_REVIEW
+            )
         return
 
     # raw_json stores what the model actually returned, not the coerced values:

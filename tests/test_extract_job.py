@@ -459,3 +459,100 @@ class TestReachingTheLedger:
         assert live[0].amount == Decimal("9.9900")
         # And the superseded row is kept, because the history is the point.
         assert session.query(Transaction).count() == 2
+
+
+def _spent(cost="0.001900"):
+    from decimal import Decimal
+
+    from llm.base import ExtractionResult
+
+    return ExtractionResult(
+        data={},
+        model="claude-haiku-4-5-20251001",
+        input_tokens=1500,
+        output_tokens=80,
+        cost_usd=Decimal(cost),
+        latency_ms=2900,
+        stop_reason="refusal",
+    )
+
+
+class TestBilledFailuresAreRecorded:
+    """
+    A refused or truncated call is billed exactly like a success. Before this,
+    it left no row, so every cost report quietly under-counted the calls that
+    bought nothing -- the ones a cost report most needs to show.
+    """
+
+    def test_a_billed_refusal_leaves_a_row_with_its_cost(self, session, ready):
+        from decimal import Decimal
+
+        repository.create_document_type_version(session, receipt_definition())
+        ready()
+
+        worker.run_extract_job(
+            session,
+            claim_extract(session),
+            FakeExtractor(raises=ExtractionRefused("model declined", spent=_spent())),
+        )
+
+        row = session.query(Extraction).one()
+        assert row.cost_usd == Decimal("0.001900")
+        assert row.input_tokens == 1500
+        assert row.raw_json is None
+        assert row.is_current is False
+        assert "declined" in row.validation_errors[0]
+
+    def test_an_unbilled_failure_still_leaves_nothing(self, session, ready):
+        """A dropped connection never reached the model, so nothing was spent."""
+        repository.create_document_type_version(session, receipt_definition())
+        ready()
+
+        worker.run_extract_job(
+            session,
+            claim_extract(session),
+            FakeExtractor(raises=ExtractionError("connection failed")),
+        )
+
+        assert session.query(Extraction).count() == 0
+
+    def test_a_billed_transient_failure_is_recorded_and_still_retried(
+        self, session, ready
+    ):
+        repository.create_document_type_version(session, receipt_definition())
+        ready()
+        job = claim_extract(session)
+
+        worker.run_extract_job(
+            session,
+            job,
+            FakeExtractor(raises=ExtractionError("not valid JSON", spent=_spent())),
+        )
+
+        assert job.status == JobStatus.QUEUED
+        assert session.query(Extraction).count() == 1
+
+    def test_a_failed_attempt_never_replaces_a_good_answer(self, session, ready):
+        """
+        The property that makes recording failures safe: the row counts for
+        cost, but a document's live extraction stays the one that worked.
+        """
+        repository.create_document_type_version(session, receipt_definition())
+        document, _ = ready()
+
+        worker.run_extract_job(
+            session, claim_extract(session), FakeExtractor({"total": "9,35"})
+        )
+        session.add(Job(kind=JobKind.EXTRACT, document_id=document.id))
+        session.commit()
+        worker.run_extract_job(
+            session,
+            claim_extract(session),
+            FakeExtractor(raises=ExtractionRefused("declined", spent=_spent())),
+        )
+
+        rows = session.query(Extraction).order_by(Extraction.attempt).all()
+        assert [r.is_current for r in rows] == [True, False]
+        assert rows[0].raw_json == {"total": "9,35"}
+        # Numbered as a real attempt, because it was one.
+        assert [r.attempt for r in rows] == [1, 2]

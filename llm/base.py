@@ -14,7 +14,20 @@ from typing import Protocol, runtime_checkable
 
 
 class ExtractionError(Exception):
-    """The call failed in a way worth recording on the document."""
+    """
+    The call failed in a way worth recording on the document.
+
+    `spent` is set when the failure happened *after* a response came back.
+    Those calls were billed -- a refusal or a max_tokens truncation is an
+    HTTP 200 with a full usage block -- and if the error did not carry the
+    usage, the cost would vanish from every report. It is None when nothing
+    reached the model (a dropped connection, a 4xx on the request itself),
+    because then nothing was charged.
+    """
+
+    def __init__(self, message: str, *, spent: ExtractionResult | None = None):
+        super().__init__(message)
+        self.spent = spent
 
 
 class ExtractionRefused(ExtractionError):

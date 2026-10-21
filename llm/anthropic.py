@@ -16,6 +16,7 @@ import json
 import logging
 import re
 import time
+from dataclasses import replace
 from decimal import Decimal
 
 import anthropic
@@ -141,38 +142,47 @@ class AnthropicExtractor:
             # max_attempts and reach the same place, a few wasted calls later.
             raise ExtractionError(f"{type(exc).__name__}: {exc}") from exc
 
-        elapsed_ms = int((time.perf_counter() - started) * 1000)
+        # Built before anything can go wrong with the body: from here on the
+        # call has been paid for, whether or not it produced anything usable,
+        # and every failure below carries this so the spend is not lost.
+        billed = ExtractionResult(
+            data={},
+            model=response.model,
+            input_tokens=response.usage.input_tokens,
+            output_tokens=response.usage.output_tokens,
+            cache_read_tokens=getattr(response.usage, "cache_read_input_tokens", 0) or 0,
+            cost_usd=price(self.model, response.usage),
+            latency_ms=int((time.perf_counter() - started) * 1000),
+            stop_reason=response.stop_reason,
+            params={"max_tokens": MAX_TOKENS, "thinking": "off", "doc_type": doc_type},
+        )
 
         if response.stop_reason == "refusal":
             detail = getattr(response.stop_details, "category", None)
-            raise ExtractionRefused(f"model declined to answer (category={detail})")
+            raise ExtractionRefused(
+                f"model declined to answer (category={detail})", spent=billed
+            )
         if response.stop_reason == "max_tokens":
             # Truncated JSON is unparseable; more attempts at the same limit
             # will truncate identically.
-            raise ExtractionRefused(f"output hit max_tokens ({MAX_TOKENS}); schema too large")
+            raise ExtractionRefused(
+                f"output hit max_tokens ({MAX_TOKENS}); schema too large", spent=billed
+            )
 
         payload = next((b.text for b in response.content if b.type == "text"), None)
         if payload is None:
-            raise ExtractionError("response contained no text block")
+            raise ExtractionError("response contained no text block", spent=billed)
 
         try:
             data = json.loads(payload)
         except json.JSONDecodeError as exc:
             # Should be impossible under structured outputs, so treat it as a
             # transient API fault rather than a permanent one.
-            raise ExtractionError(f"structured output was not valid JSON: {exc}") from exc
+            raise ExtractionError(
+                f"structured output was not valid JSON: {exc}", spent=billed
+            ) from exc
 
-        return ExtractionResult(
-            data=data,
-            model=response.model,
-            input_tokens=response.usage.input_tokens,
-            output_tokens=response.usage.output_tokens,
-            cache_read_tokens=getattr(response.usage, "cache_read_input_tokens", 0) or 0,
-            cost_usd=price(self.model, response.usage),
-            latency_ms=elapsed_ms,
-            stop_reason=response.stop_reason,
-            params={"max_tokens": MAX_TOKENS, "thinking": "off", "doc_type": doc_type},
-        )
+        return replace(billed, data=data)
 
 
 def _user_message(doc_type: str, text: str) -> str:

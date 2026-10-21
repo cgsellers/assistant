@@ -457,3 +457,41 @@ class TestDatedModelIds:
             input_tokens=10, output_tokens=10, cache_read_input_tokens=0
         )
         assert price("some-other-provider/model", usage) == Decimal("0")
+
+
+class TestBilledFailuresCarryTheirCost:
+    """
+    A refusal or a truncation is an HTTP 200 with a full usage block: billed
+    exactly like a success. The error has to carry that spend, or it vanishes.
+    """
+
+    def _with(self, response):
+        return AnthropicExtractor(client=FakeAnthropic(response=response))
+
+    def test_a_refusal_carries_what_it_cost(self):
+        resp = make_response(stop_reason="refusal", content=[])
+        with pytest.raises(ExtractionRefused) as caught:
+            self._with(resp).extract(json_schema=SCHEMA, text="t", doc_type="receipt")
+        assert caught.value.spent is not None
+        assert caught.value.spent.cost_usd > 0
+        assert caught.value.spent.input_tokens == resp.usage.input_tokens
+
+    def test_a_truncation_carries_what_it_cost(self):
+        resp = make_response(stop_reason="max_tokens")
+        with pytest.raises(ExtractionRefused) as caught:
+            self._with(resp).extract(json_schema=SCHEMA, text="t", doc_type="receipt")
+        assert caught.value.spent.cost_usd > 0
+
+    def test_unparseable_output_carries_what_it_cost(self):
+        resp = make_response(content=[SimpleNamespace(type="text", text="{not json")])
+        with pytest.raises(ExtractionError) as caught:
+            self._with(resp).extract(json_schema=SCHEMA, text="t", doc_type="receipt")
+        assert caught.value.spent is not None
+
+    def test_a_connection_failure_carries_nothing_because_nothing_was_billed(self):
+        extractor = AnthropicExtractor(
+            client=FakeAnthropic(raises=anthropic.APIConnectionError(request=REQUEST))
+        )
+        with pytest.raises(ExtractionError) as caught:
+            extractor.extract(json_schema=SCHEMA, text="t", doc_type="receipt")
+        assert caught.value.spent is None
