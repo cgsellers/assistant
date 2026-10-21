@@ -8,10 +8,13 @@ The design principle: **models only where perception or judgment is required.** 
 
 > Status: **phases 1, 2 and 7 complete · phase 3 in progress**. Upload, dedup, OCR,
 > routing, schema-enforced extraction, validation and the canonical ledger run end to
-> end under 620 tests, with a `receipt` type shipped in the repo, and a read-only
+> end under 652 tests, with a `receipt` type shipped in the repo, and a read-only
 > analyst agent answers questions over the ledger with citations. The eval harness
 > scores a labelled corpus per field and reports cost per document — but the corpus is
 > still being gathered, so there are **no accuracy numbers worth quoting yet**.
+
+> **[Walkthrough: one receipt, start to finish](docs/WALKTHROUGH.md)** — how the pieces
+> connect, file by file. Read this first.
 
 > **[Technical design & decision record](docs/DESIGN.md)** — architecture, the full
 > decision log with rejected alternatives, measured results, deviations from the original
@@ -350,6 +353,7 @@ Phase 3 comes before phase 5 deliberately: the eval harness exists before the mu
 - **Analyst never computes.** Arithmetic lives in deterministic tools. The model interprets and explains.
 - **LangGraph is one component, not the architecture.** Provider layer, tool registry, budgets, tracing, and evals all live outside the graph.
 - **Sensitive data.** Documents never leave local infrastructure until the extraction step. Encryption at rest and PII redaction before analyst context are planned.
+- **API keys, not accounts.** The API requires a key, stored hashed. That is authentication and not authorisation: no table has an owner column, so a key that gets in sees everything. Per-caller isolation needs tenancy in the schema first, and shouldn't arrive smuggled in behind a login.
 
 ## Local development
 
@@ -362,6 +366,7 @@ uv sync                            # creates .venv, installs from uv.lock
 cp .env.example .env               # ANTHROPIC_API_KEY is only needed from phase 2 on
 uv run alembic upgrade head        # creates ./data/ledgerline.db
 uv run python -m doctypes.seed     # loads the shipped document types
+uv run python -m core.auth create "local"   # prints a key, once
 uv run uvicorn api.main:app --reload
 # docs at http://127.0.0.1:8000/docs, health check at /health
 ```
@@ -370,7 +375,7 @@ Lint and tests:
 
 ```bash
 uv run ruff check .
-uv run pytest              # 620 tests, ~4s; no container, tesseract, network or API key
+uv run pytest              # 652 tests, ~4s; no container, tesseract, network or API key
 ```
 
 Measuring extraction against a labelled corpus:

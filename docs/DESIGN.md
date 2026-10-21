@@ -501,6 +501,40 @@ is in `extractions.raw_json` either way, and the value of a canonical table is t
 everything in it was read off a page -- which is also what makes the analyst agent's
 citations worth anything.
 
+### 5.22 API keys, and what they deliberately do not do
+
+The API had no authentication at all, which 8.8 recorded and nothing fixed. It does now:
+a key, hashed, presented as `Authorization: Bearer`.
+
+**This is authentication, not authorisation.** No table has an owner column -- no
+`user_id`, no `tenant_id` -- so every key that gets in sees every document and every
+ledger row. That is a locked front door, and calling it access control would be a lie.
+Per-caller isolation means adding tenancy to the data model first, which is a much
+larger decision and should not arrive smuggled in behind a login.
+
+**The hash is SHA-256, not bcrypt or argon2.** Slow hashes exist because human-chosen
+passwords have little entropy and must be expensive to guess. A key from
+`secrets.token_urlsafe(32)` carries 256 bits, so there is nothing to brute force and no
+reason to pay for slowness on every request. Lookup is *by* hash, so there is also no
+secret-dependent comparison to leak timing.
+
+**The dependency is on the app, not the router.** A route added later is protected
+because nobody did anything, rather than exposed because somebody forgot; opening one
+means editing `PUBLIC_PATHS`, which is a line a reviewer sees in a diff. A test adds a
+route without mentioning auth and asserts it is still shut.
+
+**Absent, malformed, unknown and revoked all answer the same.** Distinguishing them
+tells an attacker whether a key exists and tells an honest caller nothing that "check
+your key" does not.
+
+`/health` stays public: a load balancer cannot hold a credential, and refusing it would
+make an unauthenticated deploy look healthy and an authenticated one look dead. The docs
+are open because this is a project meant to be read; a real deployment would close them.
+
+`last_used_at` is written at most once a minute. Recording it on every request turns
+every GET into a write, and SQLite serialises writers -- once a minute is plenty to
+answer "is anyone still using this key".
+
 ---
 
 ## 6. Deviations from the original plan
@@ -662,7 +696,7 @@ not currently in scope.
 Python 3.12.14 · FastAPI 0.141.1 · SQLAlchemy 2.0.52 · Pydantic 2.13.5 · Alembic 1.20.0
 anthropic 1.5.0
 Migration 6823df7fd6b2 (head, applied) · alembic check: no drift · ruff: clean
-pytest: 620 passed in 3.7s (128 phase 1 · 324 phase 2 · 109 phase 3 · 59 phase 7)
+pytest: 652 passed in 4.0s (128 phase 1 · 324 phase 2 · 109 phase 3 · 59 phase 7 · 32 auth)
 ```
 
 ### 7.4 Phase 1 checklist
@@ -1022,6 +1056,39 @@ Not built: persistent chat. `ask()` keeps history inside one call, which is
 the part that has to be right first -- one question producing one auditable
 set of tool calls. Sessions are a thin layer on top and belong with the UI.
 
+### 7.8 Positional hints: measured, then not built
+
+The question came from a previous system that let an author describe a field by
+position, e.g. "delivery date, top left; not the date top right". That works today
+in the sense that `description` is free prose, so the hint reaches the model
+verbatim inside the JSON Schema.
+
+Whether the model *acts* on it was tested with four live calls. A delivery note had
+two unlabelled dates in the header, and the hint named the left one. Each run used
+flattened OCR text and hand-padded column layout, with both orderings:
+
+```
+flat text:    1/2 correct   (returned the earlier date both times)
+padded text:  1/2 correct   (returned the later date both times)
+```
+
+It never used the position. Each rendering just shifted which heuristic the model
+fell back on. Four calls on one synthetic document is suggestive rather than
+settled, but it was enough to **stop a layout-reconstruction feature being built on
+assumption**.
+
+The explanation turned out to be architectural. The earlier system generated
+*code* to parse each format, and code reading a PDF gets coordinates, so "top left"
+is a perfectly good instruction to a programmer. Ledgerline's extractor reads
+flattened text, where position is gone. `layout_blocks` with bounding boxes are
+stored on every document but never sent to the model, a gap between §5.12's stated
+intent and the build.
+
+So positional logic belongs in generated parsers (phase 6) or in vision (phase 4),
+not in text extraction. For text, the robust form is the label plus a contrast:
+"the date next to *Fecha de entrega*, not the one next to *Fecha albarán*". The
+contrastive half of a positional hint carries over; the "top left" half doesn't.
+
 ---
 
 ## 8. Known gaps and deferred work
@@ -1109,10 +1176,12 @@ because that is a tenth of a cent, and rounding to 2dp would record it as zero. 
 `extractions` row has been persisted yet: nothing writes one until the worker is wired.
 `runs`/`steps` for multi-call traces remain phase 5.
 
-**8.8 Security posture is incomplete.** Uploads are size-capped and type-checked, and
-paths are derived from content hashes rather than user-supplied filenames (so path
-traversal is structurally impossible). Not yet addressed: encryption at rest, PII
-redaction before analyst context, and authentication — there is currently no auth at all.
+**8.8 Security posture is incomplete, but no longer open.** Uploads are size-capped and
+type-checked, paths are derived from content hashes rather than user-supplied filenames
+(so path traversal is structurally impossible), and the API now requires a key — see
+5.22. Still not addressed: encryption at rest, PII redaction before analyst context, and
+rate limiting. And the key buys authentication only: nothing in the schema has an owner,
+so any caller that gets in sees everything.
 
 ---
 
@@ -1157,22 +1226,74 @@ uvx datasette data/ledgerline.db --port 8081   # browsable UI, read-only
 
 ## 11. Interview notes
 
-Points in this project worth being able to defend, and where the reasoning lives:
+Points worth being able to defend, and where the reasoning lives. For how the pieces
+connect, start with [WALKTHROUGH.md](WALKTHROUGH.md).
 
-- **Why not put a model in every step?** §2, §5.12, §5.16
-- **How do you know it works?** §7.1, §7.2, and §8.1 — 128 tests in 0.8s, including
-  claim atomicity, retry backoff and the end-to-end pipeline
-- **How do you test something that needs a GPU container?** §8.1 — `OcrEngine` is a
-  Protocol, so a `FakeEngine` substitutes for it; the suite needs no container at all
-- **Why a database queue instead of Redis?** §5.3 — transactional claims
-- **How do you avoid double-processing?** §5.4, §5.7, §5.13
-- **What happens when a worker dies mid-job?** §5.15
-- **Why did you reject the state-of-the-art OCR model?** §5.12 — hardware *and*
-  architecture, and the second reason is the interesting one
-- **What went wrong and what did you do about it?** §5.9 (a silent correctness bug caught
-  before it shipped), §6.2 (discarding unverifiable work rather than building on it)
-- **Why is a document type a database row rather than a class?** §5.20 — the phase-6
-  authoring UI is the reason the answer matters, and the closed rule vocabulary is the
-  price
-- **What is still broken?** §8, all of it — plus §7.5 for what phase 2 has written but
-  not yet verified
+### Architecture
+
+- **Why not put a model in every step?** §2, §5.12, §5.16. There is one model call in
+  the pipeline, extraction. Routing, validation and mapping are code that can be
+  tested.
+- **Why is a document type a database row rather than a class?** §5.20. It lets an
+  analyst add a type through a UI without shipping Python. The price is a closed rule
+  vocabulary and JSON instead of per-type columns.
+- **Why a database queue instead of Redis?** §5.3. Claims are transactional, and it's
+  one less service to run.
+- **Why are OCR and extraction separate jobs?** OCR is the expensive half. A failed
+  model call shouldn't cost the document its recognised text.
+
+### Correctness
+
+- **How do you avoid double-processing?** §5.4, §5.7, §5.13. Content-addressed
+  storage, a unique sha256, and the UPDATE is the lock.
+- **What happens when a worker dies mid-job?** §5.15.
+- **How do you handle money?** `Decimal` everywhere, `"1,234"` is rejected rather than
+  read as 1.234, and one canonical spelling enforced at the database boundary
+  (`core/money.py`).
+- **How do you stop a re-run receipt being counted twice?** One live ledger row per
+  document, with `is_current`. §5.21.
+
+### Measurement
+
+- **How accurate is it?** *Not yet known, and the docs say so.* The harness is built
+  (§7.6) and scores per field, separating *missed* from *hallucinated*. The labelled
+  corpus is what's missing. Saying this plainly is better than quoting 97.7% from three
+  synthetic receipts.
+- **How do you know a change helped?** `--compare` scores two models on one corpus and
+  lists regressions before the headline number. Sonnet cost 3× and moved nothing, and
+  it made the *same* hallucination, which points at the prompt rather than the tier.
+- **How do you stop the model grading its own homework?** Drafted labels are
+  `verified: false`, and the runner refuses them. The Tesseract draft in §7.6 shows why:
+  three fields were wrong and every one looked plausible.
+
+### The agent
+
+- **Why doesn't the analyst do arithmetic?** §7.7. A model summing from context is
+  occasionally wrong in a way nobody can see, so the sums live in tested SQL.
+- **How is it kept from writing?** No tool writes, so it's a missing capability rather
+  than a rule the model is asked to follow.
+- **Can its citations be trusted?** They come from typed tool results, never from its
+  prose. An earlier draft read them out of payloads, which let extracted document
+  content inject ids. §7.7.
+
+### Security
+
+- **Why a static API key and not a JWT?** §5.22. A JWT carries claims about who you
+  are, and the schema has no "who". The consumer is a machine, revocation has to be
+  instant, and JWT's stateless validation needs a denylist to revoke, which puts the
+  database lookup back. The trigger to revisit is adding users or tenants.
+- **Why SHA-256 and not bcrypt?** Slow hashes defend low-entropy human passwords. A
+  256-bit random key has nothing to brute-force.
+- **What doesn't it do?** It's authentication, not authorisation. Any key that gets in
+  sees everything. Raise this before they do.
+
+### Honesty
+
+- **What went wrong and what did you do about it?** §5.9, a silent datetime bug caught
+  before it shipped. §6.2, discarding unverifiable work instead of building on it.
+  §7.7, two bugs fixed at the contract rather than the instance, plus the admission
+  that more tests weren't the defence.
+- **What did you decide *not* to build, and how?** §7.8's positional-hints experiment. Four live
+  calls showed that "top left corner" hints do nothing against flattened OCR text,
+  which stopped a layout-reconstruction feature from being built on assumption.
+- **What is still broken?** §8, all of it.
