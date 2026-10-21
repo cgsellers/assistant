@@ -145,6 +145,10 @@ lines. Errors are classified:
 
 - `ExtractionRefused` covers 4xx responses, a refusal, or truncation at `max_tokens`.
   These are permanent; retrying only spends money.
+- A refusal or truncation is still **billed**, since it's an HTTP 200 with usage.
+  The error carries that spend, and the worker records it as a failed attempt with
+  `is_current=False`, so it shows up in the cost report and never replaces a real
+  answer (DESIGN §7.9).
 - `ExtractionError` covers rate limits, 5xx responses, connection failures, and any
   other SDK error. These are transient, so the job retries.
 
@@ -234,6 +238,7 @@ tools in `analyst/tools.py`.
 | `python -m evals.run --dry-run` | Validates labels without calling the model |
 | `python -m evals.run` | Scores per field: correct, missed, **hallucinated**, wrong |
 | `python -m evals.run --compare claude-sonnet-5` | Scores two models on the same corpus and lists regressions first |
+| `python -m core.costs` | What extraction has cost: total, wasted, per document, by model |
 
 The runner refuses unverified labels; otherwise the model would be grading its own
 homework. The real corpus lives in `data/evals/`, which is gitignored because real
@@ -243,9 +248,6 @@ receipts carry real tax ids. → DESIGN §7.6
 
 ## Things that commonly confuse
 
-- **There are two `Money` classes.** `core/models.py: Money` is a database column type.
-  `analyst/tools.py: Money` is one currency's total in a query result. They're
-  unrelated; a rename is due.
 - **"Typed layer" means JSON.** There are no `receipts` or `line_items` tables.
   `extractions.raw_json` is the typed layer, and only the fields in `canonical:` get
   promoted into real columns (§5.20).

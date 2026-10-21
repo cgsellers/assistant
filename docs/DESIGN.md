@@ -696,7 +696,7 @@ not currently in scope.
 Python 3.12.14 · FastAPI 0.141.1 · SQLAlchemy 2.0.52 · Pydantic 2.13.5 · Alembic 1.20.0
 anthropic 1.5.0
 Migration 6823df7fd6b2 (head, applied) · alembic check: no drift · ruff: clean
-pytest: 652 passed in 4.0s (128 phase 1 · 324 phase 2 · 109 phase 3 · 59 phase 7 · 32 auth)
+pytest: 679 passed in 4.5s (128 phase 1 · 336 phase 2 · 109 phase 3 · 59 phase 7 · 32 auth · 19 costs)
 ```
 
 ### 7.4 Phase 1 checklist
@@ -1089,6 +1089,37 @@ not in text extraction. For text, the robust form is the label plus a contrast:
 "the date next to *Fecha de entrega*, not the one next to *Fecha albarán*". The
 contrastive half of a positional hint carries over; the "top left" half doesn't.
 
+### 7.9 Seeing the spend, and the spend that was missing
+
+Tokens, cost and latency had been recorded on every extraction since phase 2, and
+nothing read them. `core/costs.py` does now, through the CLI and `GET /costs`, the
+latter protected by the app-wide key check with no code in the route.
+
+It keeps three numbers apart because they're easy to blur. **Total** is everything
+billed. **Wasted** is the part spent on calls that produced nothing usable. **Per
+document** is total divided by distinct documents, which is higher than the cost of
+one call by exactly the retries. Authoring trials are billed too but aren't
+production traffic, so they're reported beside the total. A call that used tokens
+but priced at zero is flagged, not summed as free.
+
+**Building it exposed a gap: billed failures left no record.** A refusal or a
+`max_tokens` truncation is an HTTP 200 with a full usage block, so it's charged
+exactly like a success. The extractor raised, the worker recorded nothing, and the
+spend disappeared. A cost report built on top would have under-reported precisely
+the calls that bought nothing, which are the ones it most needs to show.
+
+Now `ExtractionError` carries a `spent` result whenever the failure happened after
+a response arrived. `repository.record_failed_attempt` writes it as an extraction
+with `is_current=False` and no `raw_json`, so it counts for cost and attempt
+numbering but can never replace a document's real answer. A failure before any
+response, like a dropped connection, carries nothing because nothing was billed.
+
+A test also caught a bug in the latency percentiles. Nearest-rank is
+`ceil(p × n)`, and `round()` had been used instead. Python rounds half to even, so
+`round(2.5)` is `2` and the median of five values came out as the second-smallest.
+
+Live, three receipts: $0.005872 total, $0.001957 per document, p50 2.1s.
+
 ---
 
 ## 8. Known gaps and deferred work
@@ -1168,13 +1199,11 @@ lunch**. Catching that requires comparison after extraction (same vendor, total,
 tax ID → probable duplicate → review queue). Phase 4, and a genuinely different mechanism
 from what exists.
 
-**8.7 Cost tracking is built, and exercised.** `extractions` carries `input_tokens`,
-`output_tokens`, `cache_read_tokens`, `cost_usd` and `latency_ms`, and
-`AnthropicExtractor` populates all five, and the arithmetic now reconciles exactly
-against a live call — $0.001205 for one receipt (7.5). `cost_usd` is `Numeric(12, 6)`
-because that is a tenth of a cent, and rounding to 2dp would record it as zero. No
-`extractions` row has been persisted yet: nothing writes one until the worker is wired.
-`runs`/`steps` for multi-call traces remain phase 5.
+**8.7 ~~Cost tracking is unexercised~~ — resolved, and now visible.** Every extraction
+row carries tokens, cost and latency, and `python -m core.costs` / `GET /costs` read them
+back: total, wasted, per document, by model and type, latency percentiles. See 7.9.
+Still not covered: the analyst agent's calls, which are reported on each `Answer` but not
+persisted. `runs`/`steps` for multi-call traces remain phase 5.
 
 **8.8 Security posture is incomplete, but no longer open.** Uploads are size-capped and
 type-checked, paths are derived from content hashes rather than user-supplied filenames
@@ -1250,6 +1279,9 @@ connect, start with [WALKTHROUGH.md](WALKTHROUGH.md).
 - **How do you handle money?** `Decimal` everywhere, `"1,234"` is rejected rather than
   read as 1.234, and one canonical spelling enforced at the database boundary
   (`core/money.py`).
+- **What does a document cost, and how do you know?** §7.9. The total includes failed
+  attempts, because a refusal is billed like a success. Recording those was a gap that
+  only building the report exposed.
 - **How do you stop a re-run receipt being counted twice?** One live ledger row per
   document, with `is_current`. §5.21.
 

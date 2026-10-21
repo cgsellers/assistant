@@ -8,7 +8,7 @@ The design principle: **models only where perception or judgment is required.** 
 
 > Status: **phases 1, 2 and 7 complete · phase 3 in progress**. Upload, dedup, OCR,
 > routing, schema-enforced extraction, validation and the canonical ledger run end to
-> end under 652 tests, with a `receipt` type shipped in the repo, and a read-only
+> end under 679 tests, with a `receipt` type shipped in the repo, and a read-only
 > analyst agent answers questions over the ledger with citations. The eval harness
 > scores a labelled corpus per field and reports cost per document — but the corpus is
 > still being gathered, so there are **no accuracy numbers worth quoting yet**.
@@ -375,7 +375,7 @@ Lint and tests:
 
 ```bash
 uv run ruff check .
-uv run pytest              # 652 tests, ~4s; no container, tesseract, network or API key
+uv run pytest              # 679 tests, ~5s; no container, tesseract, network or API key
 ```
 
 Measuring extraction against a labelled corpus:
@@ -385,6 +385,12 @@ uv run python -m evals.run --draft-labels   # model drafts labels for you to cor
 uv run python -m evals.run --dry-run        # validate the labels, no API calls
 uv run python -m evals.run                  # score them, per field
 uv run python -m evals.run --compare claude-sonnet-5   # two models, diffed
+```
+
+What it has cost, including calls that were billed but produced nothing:
+
+```bash
+uv run python -m core.costs --since 2026-10-01     # or GET /costs
 ```
 
 Drafts are written `verified: false` and the runner will not score them until a human
