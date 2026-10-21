@@ -42,8 +42,14 @@ MAX_LIMIT = 200
 
 
 @dataclass(frozen=True)
-class Money:
-    """A total in one currency. Never summed across currencies."""
+class CurrencyTotal:
+    """
+    A total in one currency. Never summed across currencies.
+
+    Not to be confused with core.models.Money, the column type -- this was
+    once also called Money, and two unrelated classes sharing a name in one
+    small codebase is a trap for every reader.
+    """
 
     currency: str | None
     total: Decimal
@@ -61,8 +67,8 @@ class Money:
 class Totals:
     """What a spend query came to, split by currency."""
 
-    amounts: list[Money] = field(default_factory=list)
-    tax: list[Money] = field(default_factory=list)
+    amounts: list[CurrencyTotal] = field(default_factory=list)
+    tax: list[CurrencyTotal] = field(default_factory=list)
     document_ids: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict:
@@ -100,7 +106,7 @@ def _window(stmt, start: date | None, end: date | None):
     return stmt
 
 
-def _by_currency(rows: list[Transaction], attribute: str) -> list[Money]:
+def _by_currency(rows: list[Transaction], attribute: str) -> list[CurrencyTotal]:
     buckets: dict[str | None, list[Decimal]] = {}
     for row in rows:
         value = getattr(row, attribute)
@@ -108,7 +114,7 @@ def _by_currency(rows: list[Transaction], attribute: str) -> list[Money]:
             continue
         buckets.setdefault(row.currency, []).append(value)
     return [
-        Money(currency=currency, total=sum(values, Decimal("0")), count=len(values))
+        CurrencyTotal(currency=currency, total=sum(values, Decimal("0")), count=len(values))
         for currency, values in sorted(buckets.items(), key=lambda kv: (kv[0] or "",))
     ]
 
