@@ -75,22 +75,45 @@ def session(session_factory) -> Iterator[Session]:
 
 
 @pytest.fixture
-def client(session_factory) -> Iterator[TestClient]:
-    """
-    TestClient wired to the sandbox database.
+def api_key(session_factory) -> str:
+    """A real key in the sandbox database. Returned as the secret."""
+    from core import auth
 
-    dependency_overrides replaces get_session, which is why every route takes
-    its session by injection rather than importing SessionLocal directly.
-    """
+    with session_factory() as s:
+        _, secret = auth.create(s, "test suite")
+    return secret
+
+
+@pytest.fixture
+def _wired(session_factory) -> Iterator[None]:
+    """Point the app's session dependency at the sandbox database."""
 
     def _override() -> Iterator[Session]:
         with session_factory() as s:
             yield s
 
     app.dependency_overrides[get_session] = _override
+    yield
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def client(_wired, api_key) -> Iterator[TestClient]:
+    """
+    TestClient wired to the sandbox database, carrying a real key.
+
+    Authenticated rather than bypassing auth, so every API test exercises the
+    path a caller actually takes. `anon_client` is the one that does not.
+    """
+    with TestClient(app, headers={"Authorization": f"Bearer {api_key}"}) as c:
+        yield c
+
+
+@pytest.fixture
+def anon_client(_wired) -> Iterator[TestClient]:
+    """No credentials. For the tests that assert the door is shut."""
     with TestClient(app) as c:
         yield c
-    app.dependency_overrides.clear()
 
 
 # --- Fake OCR engines -------------------------------------------------------

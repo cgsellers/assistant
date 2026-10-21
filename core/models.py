@@ -417,3 +417,35 @@ class Transaction(Base):
 # The ledger's own lookup: "this document's live entry", and the join behind
 # every "what did we spend" query.
 Index("ix_transactions_current", Transaction.document_id, Transaction.is_current)
+
+
+class ApiKey(Base):
+    """
+    A credential allowed to call the ingestion API.
+
+    The key itself is never stored -- only its SHA-256 and enough of a prefix
+    to tell two apart in a listing. A database dump therefore leaks no access.
+    See core/auth.py for why a fast hash is the right choice for a
+    high-entropy secret and the wrong one for a password.
+
+    There is no owner column here or anywhere else: a key that gets in sees
+    everything. This is a locked front door, not per-caller access control,
+    and the schema would need tenancy before it could be anything more.
+    """
+
+    __tablename__ = "api_keys"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    #: What this key is for, so an unused one can be retired with confidence.
+    name: Mapped[str] = mapped_column(String(200))
+    key_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    #: The first few characters, shown in listings and logs. Not enough to use.
+    prefix: Mapped[str] = mapped_column(String(20), index=True)
+
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    #: Updated at most once a minute -- see TOUCH_AFTER. Every request would
+    #: otherwise be a write, and SQLite serialises writers.
+    last_used_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    #: Retirement is a timestamp rather than a delete, so the audit question
+    #: "what was this key doing before we killed it" stays answerable.
+    revoked_at: Mapped[datetime | None] = mapped_column(UTCDateTime)

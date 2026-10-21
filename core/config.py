@@ -23,6 +23,11 @@ class Settings(BaseSettings):
     # evals/examples/ and are committed.
     eval_corpus_dir: Path = Path("./data/evals")
 
+    # Off only for local work, and loudly. The API has no owner model, so a
+    # key that gets in sees everything -- which makes the front door the
+    # whole of the access control there is.
+    require_auth: bool = True
+
     database_url: str = "sqlite:///./data/ledgerline.db"
     storage_dir: Path = Path("./data/files")
     ocr_service_url: str = "http://localhost:8001"
