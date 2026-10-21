@@ -592,3 +592,68 @@ class TestDrafting:
                 extractor=ForbiddenExtractor(),
                 engine=self._engine(),
             )
+
+
+class TestDraftingPastARoutingMiss:
+    """
+    A corpus labelled only where routing already succeeds would score routing
+    at 100% by construction. A routing miss has to be labelled, then counted.
+    """
+
+    @pytest.fixture
+    def unroutable(self, tmp_path):
+        from .conftest import TINY_PNG
+
+        (tmp_path / "bar-001.png").write_bytes(TINY_PNG)
+        return tmp_path
+
+    def _engine(self, text):
+        from ocr.base import OcrOutput
+
+        from .conftest import FakeEngine
+
+        return FakeEngine(OcrOutput(full_text=text, blocks=[], engine="fake"))
+
+    def test_without_as_a_routing_miss_is_skipped(self, seeded, unroutable):
+        from evals.run import draft_labels
+
+        drafts = draft_labels(
+            seeded, unroutable, extractor=ForbiddenExtractor(),
+            engine=self._engine("CAFFE 0.80\nTOTALE 1.60"),
+        )
+        assert drafts == []
+
+    def test_with_as_it_is_drafted_and_the_miss_is_noted(self, seeded, unroutable):
+        from evals.run import draft_labels
+
+        drafts = draft_labels(
+            seeded, unroutable, extractor=FakeExtractor({"total": "1.60"}),
+            engine=self._engine("CAFFE 0.80\nTOTALE 1.60"), as_type="receipt",
+        )
+
+        assert len(drafts) == 1
+        label = load_corpus(unroutable)[0].label
+        assert label.doc_type == "receipt"
+        assert "routing chose nothing" in label.notes
+
+    def test_the_drafted_label_then_scores_as_a_routing_failure(self, seeded, unroutable):
+        """The point of labelling it: the scorer now sees the miss."""
+        from evals.run import draft_labels
+
+        draft_labels(
+            seeded, unroutable, extractor=FakeExtractor({"total": "1.60"}),
+            engine=self._engine("CAFFE 0.80\nTOTALE 1.60"), as_type="receipt",
+        )
+        report = run_corpus(
+            seeded, unroutable, extractor=ForbiddenExtractor(), include_unverified=True
+        )
+        assert report.routing_accuracy == 0.0
+
+    def test_an_unknown_type_is_refused_before_any_call(self, seeded, unroutable):
+        from evals.run import draft_labels
+
+        with pytest.raises(CorpusError, match="no active document type"):
+            draft_labels(
+                seeded, unroutable, extractor=ForbiddenExtractor(),
+                engine=self._engine("x"), as_type="invoice",
+            )

@@ -32,6 +32,7 @@ from evals import draft
 from evals.labels import LabelledDocument, check_corpus, load_corpus
 from evals.score import Comparison, DocumentScore, Outcome, Report, score_document
 from llm.base import ExtractionError, Extractor
+from ocr.base import OcrError, UnsupportedMediaType
 
 log = logging.getLogger("evals")
 
@@ -352,14 +353,27 @@ def draft_labels(
     extractor: Extractor,
     engine,
     limit: int | None = None,
+    as_type: str | None = None,
 ) -> list[draft.Draft]:
     """
     Write a label file for every unlabelled document in a corpus.
+
+    `as_type` drafts every document against that type even when routing
+    disagrees. Routing is part of what the corpus measures, so a routing
+    miss must not stop a document from being labelled -- otherwise the
+    corpus would contain only the documents routing already gets right, and
+    routing accuracy would read 100% by construction.
 
     Costs one OCR pass and one model call per document, and produces drafts
     rather than labels -- everything lands `verified: false` and the runner
     will not score it until a human says otherwise.
     """
+    forced = None
+    if as_type is not None:
+        forced = {d.name: d for d in registry.active_definitions(session)}.get(as_type)
+        if forced is None:
+            raise CorpusError(f"no active document type called {as_type!r}")
+
     pending = draft.unlabelled(directory)
     if not pending:
         raise CorpusError(f"no unlabelled documents in {directory}")
@@ -368,36 +382,66 @@ def draft_labels(
 
     drafted = []
     for path in pending:
-        output = engine.read(path.read_bytes(), _mime_for(path))
+        try:
+            output = engine.read(path.read_bytes(), _mime_for(path))
+        except UnsupportedMediaType as exc:
+            # This file, not the run: skip it and say so.
+            log.warning("%s: unreadable, skipped (%s)", path.name, exc)
+            continue
+        except OcrError as exc:
+            # The engine itself is failing -- usually the container is not
+            # running -- so every remaining document would fail the same way.
+            raise CorpusError(
+                f"OCR failed on {path.name}: {exc}\n"
+                "If the OCR container is not running, start it with:\n"
+                "  docker compose up -d ocr"
+            ) from exc
         text = output.full_text
         match = registry.route(session, text)
-        if match is None:
-            # No type claims it, so there is no schema to draft against. The
-            # document needs a type before it can be labelled, and saying so
-            # is more useful than writing an empty file.
-            log.warning("%s: no document type matched, skipped", path.name)
+        routed = match.definition.name if match else None
+        if forced is not None:
+            definition = forced
+            profile = match.profile if match and routed == forced.name else None
+        elif match is not None:
+            definition, profile = match.definition, match.profile
+        else:
+            # No type claims it and none was named, so there is no schema to
+            # draft against. Saying so beats writing an empty file.
+            log.warning(
+                "%s: no document type matched, skipped (use --as TYPE to draft anyway)",
+                path.name,
+            )
             continue
 
-        schema = build_json_schema(match.definition, match.profile)
-        result = extractor.extract(
-            json_schema=schema, text=text, doc_type=match.definition.name
+        schema = build_json_schema(definition, profile)
+        result = extractor.extract(json_schema=schema, text=text, doc_type=definition.name)
+        document = draft.build(
+            definition,
+            extracted=result.data,
+            ocr_text=text,
+            source=path.name,
+            model=result.model,
         )
-        label_path = draft.write(
-            path.with_suffix(".yaml"),
-            draft.build(
-                match.definition,
-                extracted=result.data,
-                ocr_text=text,
-                source=path.name,
-                model=result.model,
-            ),
+        if routed != definition.name:
+            # Worth keeping on the label: this is a routing miss the scorer
+            # will count, and a person checking the draft should know why the
+            # pipeline would never have extracted it.
+            document["notes"] += (
+                f" -- routing chose {routed or 'nothing'}; drafted as {definition.name}"
+            )
+        label_path = draft.write(path.with_suffix(".yaml"), document)
+        log.info(
+            "drafted %s (%s%s, $%s)",
+            label_path.name,
+            definition.name,
+            "" if routed == definition.name else f", routing chose {routed or 'nothing'}",
+            result.cost_usd,
         )
-        log.info("drafted %s (%s, $%s)", label_path.name, match.definition.name, result.cost_usd)
         drafted.append(
             draft.Draft(
                 name=path.stem,
                 path=label_path,
-                doc_type=match.definition.name,
+                doc_type=definition.name,
                 cost_usd=result.cost_usd,
             )
         )
@@ -539,6 +583,13 @@ def main() -> None:
         help="write draft labels for unlabelled documents, for you to correct",
     )
     parser.add_argument(
+        "--as",
+        dest="as_type",
+        default=None,
+        metavar="TYPE",
+        help="with --draft-labels: draft against TYPE even where routing disagrees",
+    )
+    parser.add_argument(
         "--include-unverified",
         action="store_true",
         help="score labels nobody has checked; the number means much less",
@@ -588,6 +639,7 @@ def main() -> None:
                 extractor=extractor,
                 engine=engine or get_engine(None),
                 limit=args.limit,
+                as_type=args.as_type,
             )
         total = sum((d.cost_usd for d in drafts if d.cost_usd), start=Decimal("0"))
         log.info("")
@@ -632,5 +684,17 @@ def main() -> None:
         print(format_report(report))
 
 
+def _cli() -> None:
+    """
+    A problem with the corpus or the environment is reported as a sentence,
+    not a traceback. Tracebacks are for bugs; "the OCR container is not
+    running" is an instruction.
+    """
+    try:
+        main()
+    except CorpusError as exc:
+        raise SystemExit(f"error: {exc}") from None
+
+
 if __name__ == "__main__":
-    main()
+    _cli()
