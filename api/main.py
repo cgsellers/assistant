@@ -6,7 +6,7 @@ from fastapi import Depends, FastAPI
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from api.routes import documents
+from api.routes import costs, documents
 from core.auth import require_api_key
 from core.config import get_settings
 from core.db import get_session
@@ -35,6 +35,7 @@ app = FastAPI(
 )
 
 app.include_router(documents.router)
+app.include_router(costs.router)
 
 
 @app.get("/health")
