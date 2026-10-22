@@ -1172,6 +1172,56 @@ A test also caught a bug in the latency percentiles. Nearest-rank is
 
 Live, three receipts: $0.005872 total, $0.001957 per document, p50 2.1s.
 
+### 7.10 First baseline: 20 real receipts
+
+Twenty Italian till receipts from Wikimedia Commons (CC BY-SA, attributed in
+`data/evals/SOURCES.md`, not committed), drafted with `--draft-labels --as receipt`,
+then checked field by field against the images and verified by hand. Italian rather
+than Spanish because only six Spanish receipts exist on Commons, and they're 1930s
+donation slips; Italian shares IVA, TOTALE and the euro, so it routes to the shipped
+type unchanged, while CONTANTE, *Pagamento elettronico* and P.IVA test whether the
+descriptions generalise.
+
+Scored through the live pipeline (PP-OCR, rebuilt rows, Haiku 4.5):
+
+| | Routing | Field accuracy | Cost / document |
+|---|---|---|---|
+| What the pipeline delivers | **9 / 20 (45%)** | 91.1% on the 9 | $0.0011 |
+| Extraction on all 20 (`--past-routing`) | — | **93.9%** | $0.0026 |
+
+Total, currency, tax id and payment method: 100% on all 20. Weakest: vendor (70%) and
+line item names (89%).
+
+**The headline is routing, not extraction.** The pipeline returns nothing for 11 of
+20 receipts. Small bars print TOTALE but no IVA line, and the other routing signals
+are Spanish, so one keyword out of eight scores below the 0.2 threshold. A field
+accuracy quoted alone would have hidden that, which is why routing is reported
+separately and why `--past-routing` exists.
+
+Every failure, by cause:
+
+| Cause | Count | Fixed by cleaner images? |
+|---|---|---|
+| Routing | 11 receipts | No; the matchers are Spanish |
+| OCR misreads (`0.70` → `8.70`, `FARMACO` → `FARHACO`) | ~9 | Yes |
+| Vendor: which name counts (trading name vs full header) | 5 | No; a definition question |
+| Quantity lines (`6 X 0,22`) missed or taken as items | ~5 | No; a description gap |
+| The model calculating (`subtotal` 10.73 = 11.85 − 1.12) | 1 | No; and against the system prompt |
+
+Cleaner receipts would fix about a third of the field errors and none of the routing.
+Born-digital PDFs are a stronger lever than scan quality: the OCR container currently
+rasterises every PDF, even one whose text layer is already exact.
+
+**Labelling had its own error rate.** Three "model errors" in the first scoring were
+label errors, OCR misreads carried over from the draft (`BOR` for BAR, `GHIACC10` for
+GHIACCIO). Correcting a draft tends to keep its typos, because a reviewer checks values
+rather than retyping them.
+
+**Runs vary.** The same 20 labels scored 94.6% and 93.9% on consecutive runs; on one
+receipt the model wrote the correct `GHIACCIO` once and copied the OCR misread the next
+time. At n = 20 a single run moves by about a point. These numbers are honest with an
+error bar, not precise, and a claimed improvement smaller than that isn't one.
+
 ---
 
 ## 8. Known gaps and deferred work

@@ -6,12 +6,12 @@ Upload receipts and invoices. Local OCR reads them, deterministic routing picks 
 
 The design principle: **models only where perception or judgment is required.** Everything else is code that can be unit-tested and never hallucinates.
 
-> Status: **phases 1, 2 and 7 complete · phase 3 in progress**. Upload, dedup, OCR,
-> routing, schema-enforced extraction, validation and the canonical ledger run end to
-> end under 703 tests, with a `receipt` type shipped in the repo, and a read-only
-> analyst agent answers questions over the ledger with citations. The eval harness
-> scores a labelled corpus per field and reports cost per document — but the corpus is
-> still being gathered, so there are **no accuracy numbers worth quoting yet**.
+> Status: **phases 1, 2 and 7 complete · phase 3 has its first baseline.** On 20 real
+> till receipts, verified by hand: extraction gets **93.9%** of fields right, with totals,
+> currency, tax ids and payment method at 100%, for about **$0.001 per receipt**. But
+> routing accepts only **9 of 20**, so end to end the pipeline returns nothing for 11 of
+> them. That is the next thing to fix, and the numbers say so. Details and every error
+> by cause: [DESIGN §7.10](docs/DESIGN.md).
 
 > **[Walkthrough: one receipt, start to finish](docs/WALKTHROUGH.md)** — how the pieces
 > connect, file by file. Read this first.
