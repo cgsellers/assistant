@@ -339,7 +339,7 @@ Phase 3 comes before phase 5 deliberately: the eval harness exists before the mu
 - **Tooling:** uv for dependencies and virtualenv, ruff for lint and format, pytest
 - **DB:** SQLite (dev, WAL mode) → Postgres
 - **Queue:** DB-backed `jobs` table polled by a worker (Redis later if needed)
-- **OCR:** self-hosted, behind an `OcrEngine` protocol, in its own container (PP-OCR models on ONNX Runtime; Tesseract as test double)
+- **OCR:** self-hosted, behind an `OcrEngine` protocol, in its own container (PP-OCR models on ONNX Runtime; Tesseract as test double). Born-digital PDFs skip it: their embedded text layer is read directly, exactly, in milliseconds
 - **Models:** Anthropic API behind an `Extractor` protocol, using structured outputs; cheap tier for extraction, strong tier for fallback and analysis
 - **Orchestration:** LangGraph (phase 5+)
 - **Infra:** Docker Compose
@@ -375,7 +375,7 @@ Lint and tests:
 
 ```bash
 uv run ruff check .
-uv run pytest              # 703 tests, ~5s; no container, tesseract, network or API key
+uv run pytest              # 724 tests, ~5s; no container, tesseract, network or API key
 ```
 
 Measuring extraction against a labelled corpus:

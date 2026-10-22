@@ -1222,6 +1222,39 @@ receipt the model wrote the correct `GHIACCIO` once and copied the OCR misread t
 time. At n = 20 a single run moves by about a point. These numbers are honest with an
 error bar, not precise, and a claimed improvement smaller than that isn't one.
 
+### 7.11 Born-digital PDFs skip OCR
+
+The project's focus is moving to English invoices, which mostly arrive as PDFs
+exported from accounting software. Those PDFs already contain their text, exactly,
+with every character's position. The OCR container nevertheless rasterised every
+PDF and recognised it back, spending seconds to replace exact text with a guess at
+it.
+
+`ocr/pdftext.py` reads the text layer first. Fragments come from PDFium's text
+rectangles, which are runs on one line, so on a two-column invoice the description
+and the amount arrive separately with exact boxes, the input row reconstruction
+needs. Coordinates are converted to the top-left origin every other engine uses.
+A PDF with fewer than 20 non-space characters (a scan, an image-only export) falls
+back to OCR, as does a malformed one.
+
+It's a wrapper, `TextLayerFirst`, applied inside `get_engine`, so the worker and the
+eval harness take the same decision and can't disagree about which documents were
+OCRed. `ocr_results.engine` records which reader actually ran: `pdf-text` or
+`ppocr-onnx`.
+
+Measured on a generated two-column invoice: **18 ms against 1.7 s** for the OCR
+container, the same 18 fragments, and correct rows from both. That PDF is clean vector
+text, the easiest case OCR gets, so the measured win is speed, no container, and a
+guarantee. The accuracy win is where OCR misreads: small type, currency symbols, long
+reference numbers. On the Italian receipts those misreads were about a third of all
+field errors, and for a PDF with a text layer they can't occur. That claim is
+structural, not yet measured on real invoices.
+
+Two limits. `mean_confidence` is left null rather than 1.0, because a scanner's own
+OCR layer looks identical from here and isn't exact. And the decision is per
+document: a PDF with some text pages and some scanned ones uses the text layer
+throughout.
+
 ---
 
 ## 8. Known gaps and deferred work
@@ -1285,7 +1318,7 @@ A duplicate upload is an *event*, not a state: the API returns the original with
 from `DocStatus` and from the README state machine, which no longer promises a state the
 schema cannot produce.
 
-**8.4 ~~No PDF support~~ — resolved.** The OCR container rasterises PDFs with
+**8.4 ~~No PDF support~~ — resolved, and digital PDFs skip OCR (7.11).** The OCR container rasterises PDFs with
 `pypdfium2` at 200 DPI, capped at 20 pages. Tesseract still refuses PDFs by design, since
 it has no rasteriser and should not guess; that path is now only used for tests.
 

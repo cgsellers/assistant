@@ -86,7 +86,10 @@ worker still runs out of retries instead of looping forever (§5.15).
 
 ## 3. OCR
 
-`run_ocr_job` loads the bytes and calls whichever `OcrEngine` is configured. PP-OCR
+`run_ocr_job` loads the bytes and calls whichever `OcrEngine` is configured. Every
+engine is wrapped in `ocr/pdftext.py: TextLayerFirst`: a born-digital PDF is read
+from its own embedded text, exactly and in milliseconds, and only images and scans
+reach OCR (DESIGN §7.11). PP-OCR
 runs in its own container. Tesseract runs in-process and is mainly the test double
 (§5.12). Both satisfy the same protocol in `ocr/base.py`, which is why the test suite
 needs no container.
