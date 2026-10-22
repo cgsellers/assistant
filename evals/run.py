@@ -33,6 +33,7 @@ from evals.labels import LabelledDocument, check_corpus, load_corpus
 from evals.score import Comparison, DocumentScore, Outcome, Report, score_document
 from llm.base import ExtractionError, Extractor
 from ocr.base import OcrError, UnsupportedMediaType
+from ocr.layout import extraction_text
 
 log = logging.getLogger("evals")
 
@@ -74,7 +75,7 @@ def resolve_text(document: LabelledDocument, engine=None) -> Resolved:
         )
 
     output = engine.read(path.read_bytes(), _mime_for(path))
-    return Resolved(output.full_text, from_cache=False)
+    return Resolved(extraction_text(output.full_text, output.blocks), from_cache=False)
 
 
 def _mime_for(path: Path) -> str:
@@ -396,7 +397,7 @@ def draft_labels(
                 "If the OCR container is not running, start it with:\n"
                 "  docker compose up -d ocr"
             ) from exc
-        text = output.full_text
+        text = extraction_text(output.full_text, output.blocks)
         match = registry.route(session, text)
         routed = match.definition.name if match else None
         if forced is not None:

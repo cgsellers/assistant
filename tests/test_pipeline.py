@@ -130,7 +130,10 @@ class TestHappyPath:
         # 8. the model saw the type's descriptions, not a generic prompt
         sent = extractor.calls[0]
         assert sent["doc_type"] == "receipt"
-        assert sent["text"] == RECEIPT.full_text
+        # Rebuilt from the boxes: TOTAL and 9.35 sit at the same height, so
+        # they arrive as one line rather than as two unrelated ones.
+        lines = [line.split() for line in sent["text"].splitlines()]
+        assert ["TOTAL", "9.35"] in lines
         assert "labelled TOTAL" in sent["json_schema"]["properties"]["total"]["description"]
 
         # 9. queue drained

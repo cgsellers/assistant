@@ -36,6 +36,7 @@ from llm import get_extractor
 from llm.base import ExtractionError, ExtractionRefused, Extractor
 from ocr import get_engine
 from ocr.base import OcrEngine, OcrError, UnsupportedMediaType
+from ocr.layout import blocks_from_json, extraction_text
 
 log = logging.getLogger("worker")
 
@@ -255,7 +256,9 @@ def run_extract_job(session: Session, job: Job, extractor: Extractor) -> None:
         )
         return
 
-    text = ocr.full_text or ""
+    # Rows rebuilt from the stored boxes, not the engine's flattened text: on a
+    # two-column receipt the flat order pairs names with the wrong prices.
+    text = extraction_text(ocr.full_text or "", blocks_from_json(ocr.layout_blocks))
     match = registry.route(session, text)
     if match is None:
         # Not a failure. No registered type cleared its own min_score, so there

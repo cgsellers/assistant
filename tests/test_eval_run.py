@@ -490,14 +490,16 @@ class TestDrafting:
         return tmp_path
 
     def _engine(self):
-        from ocr.base import OcrOutput, TextBlock
+        from ocr.base import OcrOutput
 
         from .conftest import FakeEngine
 
         return FakeEngine(
+            # No boxes, so extraction falls back to full_text: these tests
+            # are about drafting, and layout has tests of its own.
             OcrOutput(
                 full_text=OCR_TEXT,
-                blocks=[TextBlock(text="TOTAL", bbox=(0, 0, 1, 1), confidence=1.0)],
+                blocks=[],
                 mean_confidence=0.99,
                 engine="fake",
                 engine_version="1.0",
