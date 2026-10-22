@@ -16,6 +16,7 @@ dependencies = [
     # block scalars keep them readable. Declared rather than leaned on as a
     # transitive dependency of the fastapi extras.
     "pyyaml",
+    "pypdfium2>=5.14.0",
 ]
 
 [dependency-groups]

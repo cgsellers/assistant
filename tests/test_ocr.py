@@ -46,11 +46,11 @@ class TestProtocolConformance:
 
 class TestGetEngine:
     def test_returns_ppocr_by_default(self, settings):
-        assert get_engine().name == "ppocr-onnx"
+        assert get_engine().fallback.name == "ppocr-onnx"
 
     def test_can_be_overridden_by_name(self, settings):
-        assert get_engine("tesseract").name == "tesseract"
-        assert get_engine("PPOCR").name == "ppocr-onnx"  # case-insensitive
+        assert get_engine("tesseract").fallback.name == "tesseract"
+        assert get_engine("PPOCR").fallback.name == "ppocr-onnx"  # case-insensitive
 
     def test_rejects_an_unknown_engine(self, settings):
         with pytest.raises(ValueError, match="unknown ocr engine"):
@@ -61,7 +61,7 @@ class TestGetEngine:
 
         monkeypatch.setenv("OCR_ENGINE", "tesseract")
         get_settings.cache_clear()
-        assert get_engine().name == "tesseract"
+        assert get_engine().fallback.name == "tesseract"
 
 
 class TestParseTsv:
