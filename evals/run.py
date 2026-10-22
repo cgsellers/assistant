@@ -97,6 +97,7 @@ def run_corpus(
     engine=None,
     limit: int | None = None,
     include_unverified: bool = False,
+    past_routing: bool = False,
 ) -> Report:
     """
     Score every labelled document in `directory`.
@@ -114,7 +115,9 @@ def run_corpus(
         limit=limit,
         include_unverified=include_unverified,
     )
-    return Report(documents=[_score_prepared(p, extractor) for p in prepared])
+    return Report(
+        documents=[_score_prepared(p, extractor, past_routing=past_routing) for p in prepared]
+    )
 
 
 @dataclass(frozen=True)
@@ -203,23 +206,31 @@ def _definitions_for(
     return {name: active[name] for name in wanted}
 
 
-def _score_prepared(prepared: Prepared, extractor: Extractor) -> DocumentScore:
+def _score_prepared(
+    prepared: Prepared, extractor: Extractor, *, past_routing: bool = False
+) -> DocumentScore:
     document, expected, match = prepared.document, prepared.expected, prepared.match
+    routed = None if match is None else match.definition.name
 
-    if match is None or match.definition.name != expected.name:
-        # Routed somewhere else, or nowhere. Extracting against the type the
-        # label names would measure a pipeline that does not exist, so the
-        # document is scored as a routing failure with no fields.
-        actual = None if match is None else match.definition.name
-        log.warning("%s routed to %s, expected %s", document.name, actual, expected.name)
+    if routed != expected.name and not past_routing:
+        # Routed somewhere else, or nowhere. By default the document is scored
+        # as a routing failure with no fields: that is what the pipeline would
+        # actually produce for it.
+        log.warning("%s routed to %s, expected %s", document.name, routed, expected.name)
         return DocumentScore(
-            name=document.name, expected_type=expected.name, actual_type=actual
+            name=document.name, expected_type=expected.name, actual_type=routed
         )
 
-    schema = build_json_schema(match.definition, match.profile)
+    # With past_routing, a miss is extracted against the type the label names,
+    # so extraction is measured on every document. `actual_type` still records
+    # what routing chose, so routing accuracy stays honest; the two numbers
+    # just stop hiding each other.
+    definition = match.definition if routed == expected.name else expected
+    profile = match.profile if routed == expected.name else None
+    schema = build_json_schema(definition, profile)
     try:
         result = extractor.extract(
-            json_schema=schema, text=prepared.text, doc_type=match.definition.name
+            json_schema=schema, text=prepared.text, doc_type=definition.name
         )
     except ExtractionError as exc:
         # A failed call is not a scoring question; it is a gap in the run, and
@@ -228,11 +239,11 @@ def _score_prepared(prepared: Prepared, extractor: Extractor) -> DocumentScore:
         raise CorpusError(f"{document.name}: extraction failed: {exc}") from exc
 
     scored = score_document(
-        match.definition,
+        definition,
         document.label.expect,
         result.data,
         name=document.name,
-        actual_type=match.definition.name,
+        actual_type=routed,
     )
     return DocumentScore(
         name=scored.name,
@@ -254,6 +265,7 @@ def compare(
     engine=None,
     limit: int | None = None,
     include_unverified: bool = False,
+    past_routing: bool = False,
 ) -> Comparison:
     """
     Score one corpus under two variants and diff them.
@@ -273,7 +285,11 @@ def compare(
         include_unverified=include_unverified,
     )
     reports = tuple(
-        Report(documents=[_score_prepared(p, extractor) for p in prepared])
+        Report(
+            documents=[
+                _score_prepared(p, extractor, past_routing=past_routing) for p in prepared
+            ]
+        )
         for _, extractor in variants
     )
     return Comparison(names=(variants[0][0], variants[1][0]), reports=reports)
@@ -332,6 +348,13 @@ def format_report(report: Report) -> str:
     if latencies:
         lines.append(f"latency           {sum(latencies) // len(latencies)}ms mean")
 
+    misrouted_but_scored = [d.name for d in documents if not d.routed_correctly and d.fields]
+    if misrouted_but_scored:
+        lines.append(
+            f"                  ({len(misrouted_but_scored)} routing miss(es) extracted "
+            "anyway with --past-routing; the pipeline itself would return nothing for them)"
+        )
+
     hallucinated = [
         (d.name, f.path, f.actual)
         for d in documents
@@ -342,9 +365,33 @@ def format_report(report: Report) -> str:
         lines.append("")
         lines.append("invented values (the document said nothing):")
         for name, path, value in hallucinated:
-            lines.append(f"  {name}  {path} = {value!r}")
+            lines.append(f"  {name}  {path} = {_show(value)}")
+
+    # Every other failure, with both sides. A percentage says a field is weak;
+    # only the values say why -- a misread, a different spelling, the wrong
+    # line -- and those have different fixes.
+    failing = [
+        (d.name, f)
+        for d in documents
+        for f in d.fields
+        if f.outcome in (Outcome.WRONG, Outcome.MISSED)
+    ]
+    if failing:
+        lines.append("")
+        lines.append("wrong or missed (expected -> got):")
+        for name, f in failing:
+            lines.append(f"  {name}  {f.path}: {_show(f.expected)} -> {_show(f.actual)}")
 
     return "\n".join(lines)
+
+
+def _show(value) -> str:
+    """Values as a reader wants them: amounts plainly, not as Decimal('7.15')."""
+    if isinstance(value, Decimal):
+        return str(value)
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return repr(value)
 
 
 def draft_labels(
@@ -591,6 +638,11 @@ def main() -> None:
         help="with --draft-labels: draft against TYPE even where routing disagrees",
     )
     parser.add_argument(
+        "--past-routing",
+        action="store_true",
+        help="also extract documents routing missed, so extraction is measured on all of them",
+    )
+    parser.add_argument(
         "--include-unverified",
         action="store_true",
         help="score labels nobody has checked; the number means much less",
@@ -662,6 +714,7 @@ def main() -> None:
                 engine=engine,
                 limit=args.limit,
                 include_unverified=args.include_unverified,
+                past_routing=args.past_routing,
             )
             print(
                 json.dumps(comparison_as_dict(comparison), indent=2)
@@ -677,6 +730,7 @@ def main() -> None:
             engine=engine,
             limit=args.limit,
             include_unverified=args.include_unverified,
+            past_routing=args.past_routing,
         )
 
     if args.json:

@@ -659,3 +659,59 @@ class TestDraftingPastARoutingMiss:
                 seeded, unroutable, extractor=ForbiddenExtractor(),
                 engine=self._engine("x"), as_type="invoice",
             )
+
+
+class TestScoringPastRouting:
+    """
+    A routing miss hides every field of that document. --past-routing
+    measures extraction on it anyway, while routing accuracy still reports
+    what routing actually chose.
+    """
+
+    UNROUTABLE = LABEL | {"ocr_text": "CAFFE 0.80\nTOTALE 5,90"}
+
+    def test_by_default_a_miss_has_no_fields(self, seeded, corpus):
+        report = run_corpus(seeded, corpus(a=self.UNROUTABLE), extractor=ForbiddenExtractor())
+        assert report.documents[0].fields == []
+
+    def test_past_routing_extracts_it_anyway(self, seeded, corpus):
+        report = run_corpus(
+            seeded, corpus(a=self.UNROUTABLE),
+            extractor=FakeExtractor(ANSWER), past_routing=True,
+        )
+        assert report.documents[0].fields
+        assert report.accuracy == 1.0
+
+    def test_routing_accuracy_stays_honest(self, seeded, corpus):
+        """Extracting past a miss must not turn the miss into a success."""
+        report = run_corpus(
+            seeded, corpus(a=self.UNROUTABLE),
+            extractor=FakeExtractor(ANSWER), past_routing=True,
+        )
+        assert report.routing_accuracy == 0.0
+        assert report.documents[0].actual_type is None
+
+    def test_the_report_says_the_pipeline_would_return_nothing(self, seeded, corpus):
+        report = run_corpus(
+            seeded, corpus(a=self.UNROUTABLE),
+            extractor=FakeExtractor(ANSWER), past_routing=True,
+        )
+        assert "would return nothing" in format_report(report)
+
+
+class TestTheReportShowsWhy:
+    def test_a_wrong_value_is_listed_with_both_sides(self, seeded, corpus):
+        report = run_corpus(
+            seeded, corpus(), extractor=FakeExtractor(ANSWER | {"vendor": "SOMEWHERE ELSE"})
+        )
+        text = format_report(report)
+        assert "wrong or missed" in text
+        assert "'CAFE SUNRISE' -> 'SOMEWHERE ELSE'" in text
+
+    def test_amounts_read_plainly_not_as_decimal_reprs(self, seeded, corpus):
+        report = run_corpus(
+            seeded, corpus(), extractor=FakeExtractor(ANSWER | {"total": "6,10"})
+        )
+        text = format_report(report)
+        assert "5.90 -> 6.10" in text
+        assert "Decimal(" not in text
