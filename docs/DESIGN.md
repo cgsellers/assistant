@@ -696,7 +696,7 @@ not currently in scope.
 Python 3.12.14 · FastAPI 0.141.1 · SQLAlchemy 2.0.52 · Pydantic 2.13.5 · Alembic 1.20.0
 anthropic 1.5.0
 Migration 6823df7fd6b2 (head, applied) · alembic check: no drift · ruff: clean
-pytest: 679 passed in 4.5s (128 phase 1 · 336 phase 2 · 109 phase 3 · 59 phase 7 · 32 auth · 19 costs)
+pytest: 703 passed in 4.5s
 ```
 
 ### 7.4 Phase 1 checklist
@@ -1056,7 +1056,7 @@ Not built: persistent chat. `ask()` keeps history inside one call, which is
 the part that has to be right first -- one question producing one auditable
 set of tool calls. Sessions are a thin layer on top and belong with the UI.
 
-### 7.8 Positional hints: measured, then not built
+### 7.8 Positional hints: measured, dropped; row reconstruction: measured, built
 
 The question came from a previous system that let an author describe a field by
 position, e.g. "delivery date, top left; not the date top right". That works today
@@ -1088,6 +1088,58 @@ So positional logic belongs in generated parsers (phase 6) or in vision (phase 4
 not in text extraction. For text, the robust form is the label plus a contrast:
 "the date next to *Fecha de entrega*, not the one next to *Fecha albarán*". The
 contrastive half of a positional hint carries over; the "top left" half doesn't.
+
+**Then real receipts settled the other half of the question.** That experiment asked
+whether a model can *reason* about position, and it can't. A different question turned
+out to matter more: whether the text keeps a printed line together. On a
+two-column Italian till receipt (product left, price right), PP-OCR's reading order
+listed the names and then the prices out of step. The model paired them by position
+and got almost every item wrong while still getting the total right. That's why the
+error was invisible from the headline number.
+
+`ocr/layout.py` rebuilds printed lines from the boxes: fragments at the same height
+are one line, ordered left to right, placed in proportional columns. Same receipt,
+same model, same OCR:
+
+```
+flat text     19 items, amounts on the right item:  1/19   total 52,08
+rebuilt rows  19 items, amounts on the right item: 19/19   total 52,08   (same cost)
+```
+
+That's the line items gap between §5.12's intent and the build, closed. It's built
+because it was measured, not because it seemed sensible; the first layout idea, which
+seemed equally sensible, failed its measurement and was dropped. On receipts where
+name and price print close enough to be one OCR fragment, nothing changes, which is
+the right outcome. `extraction_text` is the single place both the worker and the eval
+harness get their text from, so the two cannot render a document differently.
+
+**The first version regressed a tilted photo.** A receipt shot at −3.3° lifts the
+right-hand column by a full line across the page, so grouping on raw heights attached
+every price to the label one row below it, and `TOTALE` picked up the cash tendered.
+Flat text had done better on that receipt. The label caught it, which is the point of
+a fixed answer key.
+
+The correction was already half-built. PP-OCR returns each detection as a
+quadrilateral that keeps its rotation (`TextBlock.polygon`), where `bbox` discards it.
+The median slope of the outlines is the page's tilt, and each fragment's height is
+corrected by its distance across the page before grouping. Fragments narrower than
+15px don't vote, since a two-character box tilts whole degrees from one pixel of
+jitter. Pages without outlines keep the old behaviour. After the fix, both receipts
+are right: 19/19 on the two-column one, 3/3 plus the total on the tilted one.
+
+**A check that turned out not to check.** To look for further regressions without
+finished labels, the 20 receipts were extracted both ways and tested on whether the
+line items sum to the total. That catches misreads and missing items, but it **can't
+see a mis-pairing at all**: a swap moves the same amounts between lines and the sum
+is unchanged. The two-column receipt "added up" in both renderings while one of them
+had 18 of 19 items wrong. Pairing is only measurable against labels.
+
+What the check did surface was **OCR misreads**, a separate class this doesn't touch:
+`4.00` read as `400`, `0.70` as `8.70`, `0.56` as `950`, `UOVO` as `LOVO`. Both renderings
+carry the same misread digits; the model sometimes "repaired" them from flat text, which
+the system prompt forbids, and copied them faithfully from rows. The label holds what's
+printed and the scorer counts the difference. That's an end-to-end measurement, OCR
+included, and it's the case the vision fallback exists for.
 
 ### 7.9 Seeing the spend, and the spend that was missing
 
@@ -1325,7 +1377,10 @@ connect, start with [WALKTHROUGH.md](WALKTHROUGH.md).
   before it shipped. §6.2, discarding unverifiable work instead of building on it.
   §7.7, two bugs fixed at the contract rather than the instance, plus the admission
   that more tests weren't the defence.
-- **What did you decide *not* to build, and how?** §7.8's positional-hints experiment. Four live
+- **What did you decide *not* to build, and how?** §7.8. Positional hints failed a
+  four-call experiment and were dropped. Row reconstruction was then built because a
+  real receipt measured 1/19 → 19/19 line items correct. The same discipline, applied
+  twice with opposite results. Four live
   calls showed that "top left corner" hints do nothing against flattened OCR text,
   which stopped a layout-reconstruction feature from being built on assumption.
 - **What is still broken?** §8, all of it.

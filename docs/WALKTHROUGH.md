@@ -109,8 +109,10 @@ fails, the document shouldn't lose its recognised text and pay for OCR again
 
 ## 4. Routing: which kind of document is this?
 
-`run_extract_job` reads the stored OCR text and calls
-`doctypes/registry.py: route`.
+`run_extract_job` rebuilds the text from the stored bounding boxes with
+`ocr/layout.py: extraction_text`, so each product and its price sit on one line as
+printed. Flattened OCR order had paired names with the wrong prices on two-column
+receipts (DESIGN §7.8). Then it calls `doctypes/registry.py: route`.
 
 A document type isn't Python code. It's a **row** in `document_types`, a validated
 `Definition` (`doctypes/definition.py`) loaded from YAML. The shipped one is

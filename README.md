@@ -8,7 +8,7 @@ The design principle: **models only where perception or judgment is required.** 
 
 > Status: **phases 1, 2 and 7 complete · phase 3 in progress**. Upload, dedup, OCR,
 > routing, schema-enforced extraction, validation and the canonical ledger run end to
-> end under 679 tests, with a `receipt` type shipped in the repo, and a read-only
+> end under 703 tests, with a `receipt` type shipped in the repo, and a read-only
 > analyst agent answers questions over the ledger with citations. The eval harness
 > scores a labelled corpus per field and reports cost per document — but the corpus is
 > still being gathered, so there are **no accuracy numbers worth quoting yet**.
@@ -375,7 +375,7 @@ Lint and tests:
 
 ```bash
 uv run ruff check .
-uv run pytest              # 679 tests, ~5s; no container, tesseract, network or API key
+uv run pytest              # 703 tests, ~5s; no container, tesseract, network or API key
 ```
 
 Measuring extraction against a labelled corpus:
