@@ -1317,6 +1317,42 @@ after both pass through the model. And a stricter rule can make a stored definit
 invalid: the registry skips it, so the type stops routing, and the seed must replace
 it rather than crash trying to compare against it.
 
+### 7.14 Invoices on a held-out set
+
+The 20-invoice corpus was used for tuning: the nullable total, the `taxes` list and the
+lone-tax rule were all changes made because of what those invoices showed. Its 99.5%
+is therefore a training score. The honest number comes from 15 more invoices, one from
+each of 15 FATURA templates the tuning corpus never used, drafted with the invoice type
+frozen at v5, verified by hand, and scored once:
+
+| | Routing | Field accuracy | Cost / document |
+|---|---|---|---|
+| Held out, 15 unseen layouts | **12 / 15 (80%)** | **100%** (`--past-routing`) | $0.0038 |
+
+Three qualifications travel with that 100%. Fifteen documents can't distinguish it from
+about 95%; one error would have read 93%. FATURA is synthetic and cleanly rendered, the
+easiest possible input. And the labels began as drafts from the same model, so an error
+that is plausible on review would score as correct. What it does show is no sign that
+extraction overfits to the layouts it was tuned on.
+
+**Routing failed on 3 of 15, and two were claimed by `receipt`.** That uncovered two bugs
+in `match_score` that the tuning set never exercised:
+
+1. **Keywords match as substrings.** The receipt keyword `iva` matched *Sullivan* in a
+   customer's name and *rivassarah* in an email address. (The Italian receipts had
+   routed partly by the same accident: `total` inside *TOTALE*.)
+2. **Scores aren't comparable across types.** A score is hits over signals, so two hits
+   score 0.222 for the invoice type's nine signals and 0.25 for the receipt type's
+   eight. A type with more keywords loses ties for being thorough.
+
+The third miss is ordinary: "invoice" was the only invoice word on the page, 1 of 9
+signals.
+
+Per the holdout rule, these are recorded here before being fixed. Once routing changes
+in response to this set, **its routing number is spent**: a routing claim afterwards
+needs fresh templates (15 FATURA templates remain unused). The extraction number stays
+valid for as long as extraction isn't changed because of it.
+
 ---
 
 ## 8. Known gaps and deferred work
