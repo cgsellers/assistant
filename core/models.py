@@ -466,3 +466,64 @@ class ApiKey(Base):
     #: Retirement is a timestamp rather than a delete, so the audit question
     #: "what was this key doing before we killed it" stays answerable.
     revoked_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    #: "author" or "admin" -- see core.auth.Role. Machines draft and try
+    #: processors; putting one live takes an admin key or an admin person.
+    role: Mapped[str] = mapped_column(String(10), default="author", server_default="author")
+
+
+class User(Base):
+    """
+    A person who signs in to the panel.
+
+    Separate from `api_keys` because the two are different kinds of secret:
+    a key is 256 random bits a machine holds, a password is something a
+    person chose and can be guessed. They are stored and checked differently
+    (core/users.py), and only people get sessions.
+
+    Still no owner column on the data: a user, like a key, sees everything.
+    Roles decide what they may *change*, which is the risk the panel adds.
+    """
+
+    __tablename__ = "users"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    #: Lowercased on the way in, so "Ana@x.com" and "ana@x.com" are one person.
+    email: Mapped[str] = mapped_column(String(254), unique=True, index=True)
+    name: Mapped[str | None] = mapped_column(String(200))
+    password_hash: Mapped[str] = mapped_column(String(200))
+    role: Mapped[str] = mapped_column(String(10), default="author")
+
+    #: Consecutive failures, and when signing in is allowed again after too
+    #: many. Reset by a successful sign-in.
+    failed_logins: Mapped[int] = mapped_column(Integer, default=0)
+    locked_until: Mapped[datetime | None] = mapped_column(UTCDateTime)
+
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    last_login_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    #: Disabling rather than deleting, for the same reason keys are revoked:
+    #: `created_by` on processor versions still has to mean someone.
+    disabled_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+
+
+class UserSession(Base):
+    """
+    One signed-in browser. Server-side, so signing out or disabling a user
+    ends it immediately -- a signed cookie could only expire.
+
+    The cookie holds a random token; only its SHA-256 is stored, as with API
+    keys and for the same reason. The CSRF token is not a secret from the
+    browser: it is the proof that a state-changing request came from a page
+    the panel rendered, not from another site riding the cookie.
+    """
+
+    __tablename__ = "user_sessions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    csrf_token: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(UTCDateTime)
+    revoked_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+
+    user: Mapped[User] = relationship()

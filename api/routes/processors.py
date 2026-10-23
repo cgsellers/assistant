@@ -23,9 +23,9 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.orm import Session
 
 from api.routes.documents import check_upload
-from core.auth import require_api_key
+from core.auth import Principal, Role, require_role
 from core.db import get_session
-from core.models import ApiKey, DocumentTypeDefinition
+from core.models import DocumentTypeDefinition
 from doctypes import authoring
 from doctypes.authoring import AuthoringError, Conflict, NotFound
 
@@ -49,9 +49,19 @@ def get_ocr_engine():
     return get_engine()
 
 
-def actor(key: ApiKey | None = Depends(require_api_key)) -> str:
+# Drafting and trying are author work; publishing and retiring put code live
+# or take a processor away from live traffic, so they need an admin.
+_AUTHOR = require_role(Role.AUTHOR)
+_ADMIN = require_role(Role.ADMIN)
+
+
+def author(principal: Principal = Depends(_AUTHOR)) -> str:
     """Who is doing this, for `created_by` and the log."""
-    return f"key:{key.name}" if key is not None else "local"
+    return principal.label
+
+
+def admin(principal: Principal = Depends(_ADMIN)) -> str:
+    return principal.label
 
 
 # --- Shapes -----------------------------------------------------------------
@@ -200,7 +210,7 @@ def get_version(name: str, version: int, session: Session = Depends(get_session)
     summary="Start a draft",
 )
 def create_draft(
-    body: DraftIn, session: Session = Depends(get_session), who: str = Depends(actor)
+    body: DraftIn, session: Session = Depends(get_session), who: str = Depends(author)
 ):
     """
     A draft of a new processor, or of a published version of an existing one
@@ -216,7 +226,8 @@ def create_draft(
     "/{name}/versions/{version}", response_model=VersionDetail, summary="Save over a draft"
 )
 def update_draft(
-    name: str, version: int, body: DefinitionIn, session: Session = Depends(get_session)
+    name: str, version: int, body: DefinitionIn,
+    session: Session = Depends(get_session), _: str = Depends(author),
 ):
     return _detail(authoring.update_draft(session, name, version, body.spec()))
 
@@ -227,7 +238,7 @@ def update_draft(
 )
 def publish(
     name: str, version: int,
-    session: Session = Depends(get_session), who: str = Depends(actor),
+    session: Session = Depends(get_session), who: str = Depends(admin),
 ):
     """
     409 if another version was published after this draft was started: the
@@ -237,7 +248,7 @@ def publish(
 
 
 @router.post("/{name}/retire", response_model=VersionDetail, summary="Stop routing to it")
-def retire(name: str, session: Session = Depends(get_session), who: str = Depends(actor)):
+def retire(name: str, session: Session = Depends(get_session), who: str = Depends(admin)):
     return _detail(authoring.retire(session, name, retired_by=who))
 
 
@@ -248,6 +259,7 @@ def retire(name: str, session: Session = Depends(get_session), who: str = Depend
 def trial(
     name: str, version: int, body: TrialIn,
     session: Session = Depends(get_session), extractor=Depends(get_extractor),
+    _: str = Depends(author),
 ):
     """
     Billed like any extraction. On a stored document the attempt is recorded
@@ -269,6 +281,7 @@ def trial_file(
     file: UploadFile = File(description="A sample: image or PDF"),
     session: Session = Depends(get_session),
     extractor=Depends(get_extractor), engine=Depends(get_ocr_engine),
+    _: str = Depends(author),
 ):
     """
     Read like a real document (text layer, else OCR) but not ingested, so the

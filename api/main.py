@@ -6,8 +6,8 @@ from fastapi import Depends, FastAPI
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from api.routes import costs, documents, processors
-from core.auth import require_api_key
+from api.routes import auth, costs, documents, processors
+from core.auth import require_principal
 from core.config import get_settings
 from core.db import get_session
 from doctypes.authoring import AuthoringError
@@ -32,9 +32,10 @@ app = FastAPI(
     title="Ledgerline",
     version="0.1.0",
     lifespan=lifespan,
-    dependencies=[Depends(require_api_key)],
+    dependencies=[Depends(require_principal)],
 )
 
+app.include_router(auth.router)
 app.include_router(documents.router)
 app.include_router(costs.router)
 app.include_router(processors.router)

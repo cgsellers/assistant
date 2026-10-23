@@ -28,6 +28,13 @@ class Settings(BaseSettings):
     # whole of the access control there is.
     require_auth: bool = True
 
+    # Panel sign-ins. A working day: long enough not to nag, short enough
+    # that a forgotten browser does not stay signed in for a week.
+    session_hours: int = 12
+    # Secure cookies are only sent over HTTPS. On by default; turn it off in
+    # .env only for plain-http local work in a browser that insists.
+    session_cookie_secure: bool = True
+
     database_url: str = "sqlite:///./data/ledgerline.db"
     storage_dir: Path = Path("./data/files")
     ocr_service_url: str = "http://localhost:8001"

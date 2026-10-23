@@ -388,7 +388,7 @@ before/after numbers rather than asserted.
 - **Analyst never computes.** Arithmetic lives in deterministic tools. The model interprets and explains.
 - **LangGraph is one component, not the architecture.** Provider layer, tool registry, budgets, tracing, and evals all live outside the graph.
 - **Sensitive data.** Documents never leave local infrastructure until the extraction step. Encryption at rest and PII redaction before analyst context are planned.
-- **API keys, not accounts.** The API requires a key, stored hashed. That is authentication and not authorisation: no table has an owner column, so a key that gets in sees everything. Per-caller isolation needs tenancy in the schema first, and shouldn't arrive smuggled in behind a login.
+- **Keys for machines, accounts for people.** Machines send an API key (SHA-256 is enough for 256 random bits); people sign in to the panel with a password (argon2id, because people choose guessable ones) and get a server-side session, revocable at once, with CSRF protection. Two roles: *authors* draft and trial-run processors, *admins* publish them. Still not tenancy: no table has an owner column, so anyone who gets in sees everything.
 
 ## Local development
 
@@ -401,7 +401,8 @@ uv sync                            # creates .venv, installs from uv.lock
 cp .env.example .env               # ANTHROPIC_API_KEY is only needed from phase 2 on
 uv run alembic upgrade head        # creates ./data/ledgerline.db
 uv run python -m doctypes.seed     # loads the shipped document types
-uv run python -m core.auth create "local"   # prints a key, once
+uv run python -m core.auth create "local" --role admin   # prints a key, once
+uv run python -m core.users create you@example.com --role admin   # a panel login
 uv run uvicorn api.main:app --reload
 # docs at http://127.0.0.1:8000/docs, health check at /health
 ```

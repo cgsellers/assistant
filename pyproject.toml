@@ -17,6 +17,9 @@ dependencies = [
     # transitive dependency of the fastapi extras.
     "pyyaml",
     "pypdfium2>=5.14.0",
+    # Passwords for panel users. Deliberately slow, unlike the SHA-256 that
+    # API keys use -- see core/users.py for why the two differ.
+    "argon2-cffi>=25.1.0",
 ]
 
 [dependency-groups]

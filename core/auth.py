@@ -1,5 +1,10 @@
 """
-API keys: who is allowed to talk to the ingestion API at all.
+Who is making a request, and what they may do.
+
+Two kinds of caller. Machines present an API key; people sign in to the panel
+and carry a session cookie (core/users.py). Both become a `Principal` with a
+role, and every route sees that and nothing else, so a route never has to
+know which door someone came in by.
 
 This is authentication, not authorisation. Nothing in the schema has an
 owner -- no `user_id`, no `tenant_id` -- so every key that gets in sees
@@ -17,6 +22,11 @@ every request.
 
 Lookup is by hash, so there is no secret-dependent comparison to leak timing.
 
+Roles decide what a caller may change, not what it may see: an *author*
+drafts and trial-runs processors, an *admin* also publishes and retires them,
+which is what puts a transform's code live. Reads are open to anyone who got
+in.
+
 Run it with:  uv run python -m core.auth create "ingestion worker"
 """
 
@@ -26,7 +36,9 @@ import argparse
 import hashlib
 import logging
 import secrets
+from dataclasses import dataclass
 from datetime import datetime, timedelta
+from enum import StrEnum
 
 from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy import select
@@ -51,7 +63,41 @@ VISIBLE = len(PREFIX) + 8
 #: unauthenticated deploy look healthy and an authenticated one look dead.
 #: The docs are open because this is a project meant to be read; a deployment
 #: that cared would close them.
-PUBLIC_PATHS = frozenset({"/health", "/docs", "/redoc", "/openapi.json"})
+PUBLIC_PATHS = frozenset({"/health", "/docs", "/redoc", "/openapi.json", "/auth/login"})
+
+#: The panel's session cookie. HttpOnly, so page scripts cannot read it.
+SESSION_COOKIE = "ledgerline_session"
+#: Where a signed-in browser sends its CSRF token on anything that changes
+#: state. HTMX sets it on every request from a page's meta tag.
+CSRF_HEADER = "x-csrf-token"
+SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+
+class Role(StrEnum):
+    AUTHOR = "author"
+    ADMIN = "admin"
+
+
+@dataclass(frozen=True)
+class Principal:
+    """Whoever is making this request, however they authenticated."""
+
+    kind: str  # "key", "user", or "local" when auth is off
+    name: str
+    role: Role
+
+    @property
+    def label(self) -> str:
+        """What goes in `created_by` and the log: "key:worker", "user:ana@x.com"."""
+        return f"{self.kind}:{self.name}"
+
+    def may(self, role: Role) -> bool:
+        return self.role is Role.ADMIN or self.role is role
+
+
+#: Auth switched off for local work: everything is allowed, and the lifespan
+#: hook has already warned about it.
+LOCAL = Principal(kind="local", name="local", role=Role.ADMIN)
 
 #: `last_used_at` is useful for spotting a key nobody uses any more, but
 #: writing it on every request turns every GET into a write, and SQLite
@@ -69,13 +115,15 @@ def fingerprint(key: str) -> str:
     return hashlib.sha256(key.encode()).hexdigest()
 
 
-def create(session: Session, name: str) -> tuple[ApiKey, str]:
+def create(session: Session, name: str, *, role: str = Role.AUTHOR) -> tuple[ApiKey, str]:
     """
     Mint a key. Returns the row and the secret, which is the only time the
     secret exists anywhere.
     """
     secret = generate()
-    row = ApiKey(name=name, key_hash=fingerprint(secret), prefix=secret[:VISIBLE])
+    row = ApiKey(
+        name=name, key_hash=fingerprint(secret), prefix=secret[:VISIBLE], role=Role(role)
+    )
     session.add(row)
     session.commit()
     return row, secret
@@ -128,37 +176,81 @@ def bearer(request: Request) -> str | None:
     return request.headers.get("x-api-key") or None
 
 
-def require_api_key(
+def require_principal(
     request: Request, session: Session = Depends(get_session)
-) -> ApiKey | None:
+) -> Principal | None:
     """
     Applied to the whole app rather than to a router.
 
     That way a route added later is protected because nobody did anything,
     rather than unprotected because somebody forgot. Opening a path is an
     explicit edit to PUBLIC_PATHS, which is a line a reviewer will see.
+
+    A key wins over a cookie when both are present. A key is never sent
+    automatically by a browser, so a request carrying one cannot be a forged
+    cross-site request -- which is also why only cookie requests are checked
+    for a CSRF token.
     """
     if request.url.path in PUBLIC_PATHS:
         return None
 
     if not get_settings().require_auth:
-        return None
+        return LOCAL
 
-    key = authenticate(session, bearer(request))
-    if key is None:
-        # The same answer for absent, malformed, unknown and revoked. Telling
-        # a caller which of those it was tells an attacker whether a key
-        # exists, and tells a legitimate caller nothing they can act on that
-        # "check your key" does not.
+    if (presented := bearer(request)) is not None:
+        key = authenticate(session, presented)
+        if key is None:
+            raise _refused()
+        return Principal(kind="key", name=key.name, role=Role(key.role))
+
+    from core import users
+
+    signed_in = users.session_for(session, request.cookies.get(SESSION_COOKIE))
+    if signed_in is None:
+        raise _refused()
+    if request.method not in SAFE_METHODS and not users.csrf_ok(
+        signed_in, request.headers.get(CSRF_HEADER)
+    ):
+        # Signed in, so this is not about who they are: the request did not
+        # come from a page the panel rendered.
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=(
-                "a valid API key is required; send it as "
-                "'Authorization: Bearer <key>'"
-            ),
-            headers={"WWW-Authenticate": "Bearer"},
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"missing or wrong CSRF token; send it in {CSRF_HEADER}",
         )
-    return key
+    request.state.user_session = signed_in
+    user = signed_in.user
+    return Principal(kind="user", name=user.email, role=Role(user.role))
+
+
+def require_role(role: Role):
+    """A dependency that admits callers holding `role` (admins hold every role)."""
+
+    def check(principal: Principal | None = Depends(require_principal)) -> Principal:
+        if principal is None:
+            raise _refused()
+        if not principal.may(role):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"this needs the {role} role; {principal.label} is {principal.role}",
+            )
+        return principal
+
+    return check
+
+
+def _refused() -> HTTPException:
+    # The same answer for absent, malformed, unknown, revoked and expired. Telling
+    # a caller which of those it was tells an attacker whether a credential
+    # exists, and tells a legitimate caller nothing they can act on that
+    # "check your credentials" does not.
+    return HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail=(
+            "a valid API key or a signed-in session is required; send a key as "
+            "'Authorization: Bearer <key>'"
+        ),
+        headers={"WWW-Authenticate": "Bearer"},
+    )
 
 
 def main() -> None:
@@ -166,6 +258,10 @@ def main() -> None:
     sub = parser.add_subparsers(dest="command", required=True)
     made = sub.add_parser("create", help="mint a key and print it once")
     made.add_argument("name", help="what this key is for, e.g. 'ingestion worker'")
+    made.add_argument(
+        "--role", choices=[r.value for r in Role], default=Role.AUTHOR,
+        help="admin keys can publish and retire processors",
+    )
     sub.add_parser("list", help="show keys, without their secrets")
     killed = sub.add_parser("revoke", help="retire a key")
     killed.add_argument("prefix", help="the visible prefix, e.g. lk_A1b2C3d4")
@@ -177,7 +273,7 @@ def main() -> None:
 
     with SessionLocal() as session:
         if args.command == "create":
-            row, secret = create(session, args.name)
+            row, secret = create(session, args.name, role=args.role)
             log.info("%s", secret)
             log.info("")
             log.info("Saved as %s. This is the only time it is shown.", row.prefix)
@@ -194,7 +290,9 @@ def main() -> None:
         for row in rows:
             state = "revoked" if row.revoked_at else "active"
             used = row.last_used_at.date().isoformat() if row.last_used_at else "never"
-            log.info("%-14s %-8s last used %-10s %s", row.prefix, state, used, row.name)
+            log.info(
+                "%-14s %-8s %-6s last used %-10s %s", row.prefix, state, row.role, used, row.name
+            )
 
 
 if __name__ == "__main__":

@@ -288,7 +288,7 @@ at the top.
 uv sync
 uv run alembic upgrade head
 uv run python -m doctypes.seed
-uv run python -m core.auth create "me"        # prints a key once
+uv run python -m core.auth create "me" --role admin   # prints a key once
 uv run uvicorn api.main:app --reload          # docs at /docs
 uv run python -m worker.run                   # in another terminal
 uv run pytest                                 # ~4s, no network needed

@@ -539,6 +539,32 @@ are open because this is a project meant to be read; a real deployment would clo
 every GET into a write, and SQLite serialises writers -- once a minute is plenty to
 answer "is anyone still using this key".
 
+**People came later, for the panel (§9.1).** Keys stay for machines; people sign in
+with a password and carry a session cookie. Both become one `Principal` with a role, so
+no route knows or cares which door a caller used.
+
+- **Passwords are argon2id; keys and session tokens are SHA-256.** The difference is the
+  same argument as above, run the other way. A password is low-entropy and reused, so
+  each guess against a stolen table should cost real time and memory. That cost is paid
+  once per sign-in, and the session token it mints is random, so per-request checks go
+  back to a fast hash.
+- **Sessions are server-side rows, not signed cookies.** Signing out, disabling a user or
+  changing a password ends the session at once; a signed token could only wait to
+  expire. That is also the answer to "why not a JWT": revocation is the requirement, and
+  a JWT needs a denylist to revoke, which puts the database lookup back.
+- **The cookie is HttpOnly, Secure and SameSite=Lax, and anything that changes state
+  needs a CSRF token** sent in a header, which a page on another site cannot read or
+  set. A request carrying an API key skips the check, because a browser never attaches a
+  key by itself.
+- **Every sign-in failure answers the same**: wrong password, unknown email, disabled or
+  locked. An unknown email still costs one hash, so timing doesn't separate them either.
+  Ten failures in a row lock the account for fifteen minutes.
+- **Roles decide what a caller may change.** An *author* drafts and trial-runs; an *admin*
+  also publishes and retires, which is what puts a transform's code live. Keys carry a
+  role too: a drafting agent's key can propose but never publish.
+
+Still authentication plus two roles, not tenancy. Everyone who gets in sees everything.
+
 ### 5.23 Transforms: the one place a type carries code
 
 The model reads and code computes. That left a gap: an invoice printing a subtotal and
@@ -1602,6 +1628,10 @@ away when it later arrives. Checked live against the real model: a draft of `inv
 tried on text with no total line came back with the total null, the transform derived
 it as 107.99, and publishing a stale draft returned 409 naming v3.
 
+Then accounts and sign-in (`core/users.py`, `/auth/login`, `/auth/logout`, `/auth/me`),
+with roles enforced on the processor routes: drafting and trials need *author*,
+publishing and retiring *admin*. See the end of §5.22.
+
 ### 9.2 Why Postgres
 
 SQLite was right for getting started: nothing to run, and a suite of almost 800 tests in
@@ -1719,6 +1749,10 @@ connect, start with [WALKTHROUGH.md](WALKTHROUGH.md).
   256-bit random key has nothing to brute-force.
 - **What doesn't it do?** It's authentication, not authorisation. Any key that gets in
   sees everything. Raise this before they do.
+- **Why sessions for the panel, and not JWTs?** §5.22. Revocation is the requirement:
+  signing out, disabling someone or changing a password has to take effect now. A JWT
+  can't be revoked without a denylist, and a denylist puts the database lookup back.
+  Server-side sessions give that for one indexed query.
 - **You store Python in the database and run it?** §5.23. People write it, not the model,
   so it gets containment rather than a sandbox: a separate interpreter, stdlib only, no
   environment, a time limit. Examples run before a version is stored, and everything it

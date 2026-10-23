@@ -76,11 +76,16 @@ def session(session_factory) -> Iterator[Session]:
 
 @pytest.fixture
 def api_key(session_factory) -> str:
-    """A real key in the sandbox database. Returned as the secret."""
+    """
+    A real key in the sandbox database. Returned as the secret.
+
+    Admin, so API tests can exercise publishing; the role checks themselves
+    are tested with keys and users made for the purpose.
+    """
     from core import auth
 
     with session_factory() as s:
-        _, secret = auth.create(s, "test suite")
+        _, secret = auth.create(s, "test suite", role="admin")
     return secret
 
 
