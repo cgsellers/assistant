@@ -428,17 +428,9 @@ def retire_page(
     session: Session = Depends(get_session),
     principal: Principal = Depends(_ADMIN),
 ):
-    from sqlalchemy import func, select
-
-    from core.models import Extraction
-
     authoring.history(session, name)  # 404 for an unknown processor
     live = repository.get_active_document_type(session, name)
-    extracted = session.scalar(
-        select(func.count(Extraction.id)).where(
-            Extraction.doc_type == name, Extraction.is_trial.is_(False)
-        )
-    )
+    extracted = authoring.extraction_count(session, name)
     return _page(request, "retire.html", principal, name=name, live=live, extracted=extracted)
 
 

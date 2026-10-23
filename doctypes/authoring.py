@@ -35,7 +35,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from core import repository
-from core.models import DocumentTypeDefinition
+from core.models import DocumentTypeDefinition, Extraction
 from doctypes import registry
 from doctypes.definition import Definition
 from doctypes.schema import build_json_schema, match_evidence, select_profile
@@ -126,6 +126,15 @@ def history(session: Session, name: str) -> list[DocumentTypeDefinition]:
     if not rows:
         raise NotFound(f"no processor called {name!r}")
     return list(rows)
+
+
+def extraction_count(session: Session, name: str) -> int:
+    """How many real (non-trial) extractions a processor has produced, ever."""
+    return session.scalar(
+        select(func.count(Extraction.id)).where(
+            Extraction.doc_type == name, Extraction.is_trial.is_(False)
+        )
+    ) or 0
 
 
 def get_version(session: Session, name: str, version: int) -> DocumentTypeDefinition:

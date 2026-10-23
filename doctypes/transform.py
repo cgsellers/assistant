@@ -71,6 +71,10 @@ out.write(json.dumps(result, default=_wire))
 """
 
 
+#: Keys of definitions whose examples passed -- see check_examples.
+_PASSED: set[str] = set()
+
+
 class TransformError(Exception):
     """The transform raised, timed out, or returned something unusable."""
 
@@ -159,6 +163,14 @@ def check_examples(definition: Definition) -> list[str]:
     transform = definition.transform
     if transform is None:
         return []
+    # The same code, examples and field types give the same answer, so a pass
+    # is remembered for the life of the process. Seeding a fresh database and
+    # previewing a publish would otherwise start an interpreter per example
+    # every time. Failures are not remembered: they are rare, and a person is
+    # about to read them.
+    key = definition.model_dump_json(include={"fields", "transform"})
+    if key in _PASSED:
+        return []
 
     failures = []
     for number, example in enumerate(transform.examples, start=1):
@@ -178,6 +190,8 @@ def check_examples(definition: Definition) -> list[str]:
                     f"example {number}: {name} should be {_show(wanted[name])}, "
                     f"got {_show(got[name])}"
                 )
+    if not failures:
+        _PASSED.add(key)
     return failures
 
 

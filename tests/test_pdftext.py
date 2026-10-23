@@ -107,6 +107,16 @@ class TestTheWrapper:
         with pytest.raises(OcrError, match="cannot read"):
             TextLayerFirst(fallback).read(b"%PDF-1.4 garbage", "application/pdf")
 
+    def test_a_pdf_over_the_page_limit_is_left_to_the_container_to_refuse(self):
+        """Not walked in the worker: the container's limit applies to it too."""
+        from ocr.pdftext import MAX_PAGES
+
+        many = make_pdf([INVOICE[0]] * (MAX_PAGES + 1))
+        assert read_text_layer(many) is None
+        fallback = FakeEngine()
+        TextLayerFirst(fallback).read(many, "application/pdf")
+        assert fallback.calls
+
     def test_its_name_says_what_it_wraps(self):
         assert TextLayerFirst(FakeEngine()).name == "pdf-text+fake"
 

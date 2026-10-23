@@ -1541,6 +1541,15 @@ type-checked, paths are derived from content hashes rather than user-supplied fi
 rate limiting. And the key buys authentication only: nothing in the schema has an owner,
 so any caller that gets in sees everything.
 
+**8.9 Untrusted PDFs are parsed outside the OCR container.** The argument for the
+container (§5.16) is that files from strangers are parsed only where there are no
+credentials and no network. Reading the PDF text layer (§7.11) broke that quietly. It
+runs PDFium in the worker, which holds the database credentials, and since the panel's
+trial uploads, in the web process too. A malicious PDF exploiting a PDFium bug would run
+beside the database password. Mitigated so far only by the 20-page limit now applied
+in-process too. The fix is to read the text layer inside the container, as a first step
+of its `/ocr` for PDFs, and that lands with step 2's compose work.
+
 ---
 
 ## 9. Roadmap
@@ -1723,8 +1732,8 @@ to attach them to, like the analyst's (§8.7).
 
 ### 9.2 Why Postgres
 
-SQLite was right for getting started: nothing to run, and a suite of almost 800 tests in
-under seven seconds. It isn't slow, and for a single-user tool on one machine it would
+SQLite was right for getting started: nothing to run, and a suite of several hundred
+tests in seconds. It isn't slow, and for a single-user tool on one machine it would
 still be the right choice. The roadmap changes the conditions:
 
 - **Several writers on several machines.** SQLite allows one writer at a time, on one
@@ -1748,6 +1757,22 @@ still be the right choice. The roadmap changes the conditions:
 
 The cost is one more service (a managed free tier is enough for the demo), and a CI job
 running the suite on Postgres so the two dialects can't drift apart unnoticed.
+
+**Prepared before the switch.** A review of the whole codebase ahead of step 2 found
+these and fixed them:
+
+- **Three rules the ledger rests on were held only by application code.** They were one
+  current extraction per document, one current ledger row per document, and one active
+  version per processor. They are now partial unique indexes, which SQLite and Postgres
+  both support. Two workers racing a demote-then-insert get an integrity error instead
+  of a receipt counted twice. Tests write the racing row directly and check it is
+  refused.
+- **Uploads shared one temp file name.** Two simultaneous uploads of the same bytes, a
+  client retrying against several API workers, could rename a half-written file into
+  place, or crash the slower writer. Each write now has its own temp file. The test
+  fails on the old code three runs in three.
+- The worker built a new model client, and new connections, for every job. It now
+  builds one.
 
 ---
 

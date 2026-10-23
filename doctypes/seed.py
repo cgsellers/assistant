@@ -39,8 +39,6 @@ log = logging.getLogger("doctypes.seed")
 
 SEED_DIR = Path(__file__).parent / "seeds"
 
-_PASSED: set[str] = set()
-
 
 def load_seeds(directory: Path | None = None) -> list[Definition]:
     """
@@ -91,15 +89,7 @@ def check_transforms(definitions: list[Definition]) -> None:
     every import of the seeds, and this starts an interpreter per example.
     """
     for definition in definitions:
-        # The same code, examples and field types give the same answer, so a
-        # pass is remembered for the life of the process. Every test that
-        # seeds a fresh database would otherwise start five interpreters.
-        key = definition.model_dump_json(include={"fields", "transform"})
-        if key in _PASSED:
-            continue
         failures = transform.check_examples(definition)
-        if not failures:
-            _PASSED.add(key)
         if failures:
             raise ValueError(
                 f"{definition.name}: the transform fails its examples:\n  "

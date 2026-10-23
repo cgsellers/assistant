@@ -35,6 +35,12 @@ MIN_CHARS = 20
 #: Points to box units. Two keeps half-point precision in integer boxes.
 SCALE = 2
 
+#: The OCR container's page limit (OCR_MAX_PAGES), held here too. Without it
+#: this reader would walk a 10,000-page PDF -- 20 MB is enough for one -- in
+#: the worker. Over the limit, the PDF goes to the container, which refuses
+#: it with a 413 and the document fails permanently, as it always would have.
+MAX_PAGES = 20
+
 
 def read_text_layer(data: bytes) -> OcrOutput | None:
     """
@@ -43,6 +49,8 @@ def read_text_layer(data: bytes) -> OcrOutput | None:
     """
     pdf = pdfium.PdfDocument(data)
     try:
+        if len(pdf) > MAX_PAGES:
+            return None
         blocks: list[TextBlock] = []
         for number, page in enumerate(pdf, start=1):
             _, height = page.get_size()

@@ -286,6 +286,10 @@ def get_source(session: Session, transaction_id: str) -> dict | None:
             transaction.occurred_on.isoformat() if transaction.occurred_on else None
         ),
         "counterparty": transaction.counterparty,
+        # Columns a transform worked out rather than the model reading them.
+        # Without this, a computed total of 120.00 sat beside a raw_json
+        # saying `total: null` -- evidence that seemed to contradict the row.
+        "derived": transaction.derived_fields or [],
         "document": {
             "id": document.id if document else None,
             "filename": document.original_filename if document else None,
@@ -297,7 +301,11 @@ def get_source(session: Session, transaction_id: str) -> dict | None:
             "doc_type": extraction.doc_type if extraction else None,
             "schema_version": extraction.schema_version if extraction else None,
             "model": extraction.model_used if extraction else None,
+            # What the model read, and what the type's transform made of it.
+            # Both, because the first is the evidence and the second is what
+            # the ledger row was built from.
             "raw_json": extraction.raw_json if extraction else None,
+            "transformed_json": extraction.transformed_json if extraction else None,
         },
     }
 

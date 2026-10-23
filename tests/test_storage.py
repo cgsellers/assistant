@@ -108,6 +108,43 @@ class TestSaveAndLoad:
         storage.save(data, storage.sha256_hex(data))
         assert list(Path(settings.storage_dir).rglob("*.tmp")) == []
 
+    def test_simultaneous_saves_of_one_file_never_leave_it_partial(self, settings, monkeypatch):
+        """
+        Two uploads of the same bytes at once -- a client retrying -- used to
+        share one temp name: one could truncate it while the other renamed it
+        into place, or rename it away while the other was about to. Each
+        writer now has its own, and the result is whole.
+        """
+        import threading
+
+        data = b"x" * 2_000_000
+        digest = storage.sha256_hex(data)
+        # Both writers must get past the "already there?" check before either
+        # finishes, which is the window the old code lost.
+        monkeypatch.setattr(storage.Path, "exists", lambda self: False)
+        barrier = threading.Barrier(8)
+        errors: list[Exception] = []
+
+        def write():
+            barrier.wait()
+            try:
+                storage.save(data, digest)
+            except Exception as exc:  # noqa: BLE001 - collected and asserted below
+                errors.append(exc)
+
+        threads = [threading.Thread(target=write) for _ in range(8)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        # A shared temp name also made the slower writer crash: the faster
+        # one's rename had already taken the file out from under it.
+        assert errors == []
+        stored = settings.storage_dir / storage.storage_key(digest)
+        assert storage.sha256_hex(stored.read_bytes()) == digest
+        assert list(Path(settings.storage_dir).rglob("*.tmp")) == []
+
     def test_creates_missing_directories(self, settings):
         assert not settings.storage_dir.exists()
         storage.save(b"x", storage.sha256_hex(b"x"))

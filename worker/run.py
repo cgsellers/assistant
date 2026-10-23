@@ -19,6 +19,7 @@ import os
 import socket
 import time
 from datetime import timedelta
+from functools import lru_cache
 
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
@@ -427,13 +428,19 @@ def _commit_to_ledger(
     )
 
 
-def tick(engine: OcrEngine, extractor: Extractor | None = None) -> bool:
+@lru_cache(maxsize=1)
+def _default_extractor() -> Extractor:
     """
-    One unit of work. Returns True if a job was processed.
+    Built on first use, then kept. On demand, so a worker that only ever sees
+    OCR jobs never constructs one and never needs an API key; kept, so the
+    HTTP client inside it -- and its open connections to the API -- is reused
+    across jobs instead of being rebuilt for every document.
+    """
+    return get_extractor()
 
-    `extractor` is built on demand rather than up front, so a worker that only
-    ever sees OCR jobs never constructs one and never needs an API key.
-    """
+
+def tick(engine: OcrEngine, extractor: Extractor | None = None) -> bool:
+    """One unit of work. Returns True if a job was processed."""
     with SessionLocal() as session:
         if (returned := reclaim_stale(session)):
             log.info("reclaimed %d stale job(s)", returned)
@@ -446,7 +453,7 @@ def tick(engine: OcrEngine, extractor: Extractor | None = None) -> bool:
         if job.kind == JobKind.OCR:
             run_ocr_job(session, job, engine)
         elif job.kind == JobKind.EXTRACT:
-            run_extract_job(session, job, extractor or get_extractor())
+            run_extract_job(session, job, extractor or _default_extractor())
         else:
             job.status = JobStatus.FAILED
             job.last_error = f"unknown job kind {job.kind!r}"

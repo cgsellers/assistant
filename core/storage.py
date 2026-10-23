@@ -13,6 +13,7 @@ against the same two-function surface.
 from __future__ import annotations
 
 import hashlib
+import tempfile
 from pathlib import Path
 
 from core.config import get_settings
@@ -56,8 +57,17 @@ def save(data: bytes, digest: str) -> str:
     # Write to a temp name and rename. rename() is atomic on POSIX, so a crash
     # mid-write leaves a stray .tmp rather than a truncated file that would
     # later be trusted as a complete document.
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_bytes(data)
+    #
+    # The temp name is unique per writer. A fixed one ("<digest>.tmp") let two
+    # simultaneous uploads of the same file -- a client retrying, with several
+    # API workers -- share it: one truncates while the other renames, and a
+    # half-written file lands at the real path. With a name each, both write
+    # whole files, and whichever rename lands last replaces identical bytes.
+    with tempfile.NamedTemporaryFile(
+        dir=path.parent, prefix=f"{path.name}.", suffix=".tmp", delete=False
+    ) as handle:
+        handle.write(data)
+        tmp = Path(handle.name)
     tmp.replace(path)
     return key
 

@@ -1,5 +1,6 @@
 """
-Phase 1 tables: documents, ocr_results, document_events, jobs.
+The tables: documents, OCR results, events and the job queue; document types,
+extractions and the ledger; API keys, users and sessions.
 
 SQLAlchemy 2.0 declarative style. Each attribute is declared twice over:
 `Mapped[...]` is the Python-side type (what your editor and type checker see),
@@ -28,6 +29,7 @@ from sqlalchemy import (
     Text,
     TypeDecorator,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -216,7 +218,7 @@ class Job(Base):
     __tablename__ = "jobs"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
-    kind: Mapped[str] = mapped_column(String(50))  # "ocr" is the only kind in phase 1
+    kind: Mapped[str] = mapped_column(String(50))  # a JobKind: "ocr" or "extract"
     document_id: Mapped[str] = mapped_column(ForeignKey("documents.id"), index=True)
     status: Mapped[str] = mapped_column(String(20), default=JobStatus.QUEUED)
     attempts: Mapped[int] = mapped_column(Integer, default=0)
@@ -297,6 +299,14 @@ class DocumentTypeDefinition(Base):
     __table_args__ = (
         UniqueConstraint("name", "version"),
         Index("ix_document_types_active", "name", "is_active"),
+        # The invariant routing depends on, held by the database rather than
+        # only by the code that demotes before it promotes. Two active
+        # versions would score the type twice; with several workers and
+        # panel users, "the code always does it right" stops being enough.
+        Index(
+            "uq_document_types_one_active", "name", unique=True,
+            sqlite_where=text("is_active"), postgresql_where=text("is_active"),
+        ),
     )
 
 
@@ -361,6 +371,12 @@ class Extraction(Base):
 
 # The extractor's lookup: "the current, non-trial extraction for this document".
 Index("ix_extractions_current", Extraction.document_id, Extraction.is_current)
+# At most one current extraction per document, enforced where it cannot be
+# raced. Trials are never current, so they are outside it by construction.
+Index(
+    "uq_extractions_one_current", Extraction.document_id, unique=True,
+    sqlite_where=text("is_current"), postgresql_where=text("is_current"),
+)
 
 
 class Transaction(Base):
@@ -434,6 +450,13 @@ class Transaction(Base):
 # The ledger's own lookup: "this document's live entry", and the join behind
 # every "what did we spend" query.
 Index("ix_transactions_current", Transaction.document_id, Transaction.is_current)
+# One live ledger row per document. Two would count a receipt twice -- the
+# failure the ledger is most careful about -- so the database refuses it even
+# if two workers race the demote-then-insert in record_transaction.
+Index(
+    "uq_transactions_one_current", Transaction.document_id, unique=True,
+    sqlite_where=text("is_current"), postgresql_where=text("is_current"),
+)
 
 
 class ApiKey(Base):

@@ -211,6 +211,22 @@ class TestCitations:
         assert source["extraction"]["raw_json"] == {"total": "10.00"}
         assert source["extraction"]["model"] == "fake"
 
+    def test_a_derived_figure_shows_what_the_model_read_and_what_was_worked_out(
+        self, session, ledger
+    ):
+        row = ledger("120.00")
+        extraction = row.extraction
+        extraction.raw_json = {"total": None, "subtotal": "100.00"}
+        extraction.transformed_json = {"total": "120.00", "subtotal": "100.00"}
+        row.derived_fields = ["amount"]
+        session.commit()
+
+        source = tools.get_source(session, row.id)
+
+        assert source["derived"] == ["amount"]
+        assert source["extraction"]["raw_json"]["total"] is None
+        assert source["extraction"]["transformed_json"]["total"] == "120.00"
+
     def test_an_unknown_transaction_returns_nothing_rather_than_raising(self, session):
         assert tools.get_source(session, "does-not-exist") is None
 
