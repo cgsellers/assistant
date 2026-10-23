@@ -3,12 +3,34 @@
 {% block content %}
 <p class="crumbs"><a href="/panel">Processors</a> / new</p>
 <h1>New processor</h1>
-<p class="muted">Start from this skeleton. It becomes a draft: nothing routes to it until it is published, and you can keep editing it until then.</p>
-<form hx-post="/panel/new" hx-target="#problems" hx-disabled-elt="find button">
-  <label>Definition (YAML)
-    <textarea name="text" rows="22" spellcheck="false" class="code">{{ text }}</textarea>
-  </label>
-  <button type="submit">Create draft</button>
-</form>
-<div id="problems"></div>
+<p class="muted">Either way it becomes a draft: nothing routes to it until it is published, and you can keep editing it until then.</p>
+
+<section class="card">
+  <h2>Draft it with AI</h2>
+  <p class="muted">Say what the document is and what you need from it, in your own words. A sample makes the field descriptions match how your documents actually read. The model drafts fields, keywords and checks — never code: if you need something calculated, its notes will say so.</p>
+  <form hx-post="/panel/new/ai" hx-encoding="multipart/form-data" hx-target="#ai-result" hx-disabled-elt="find button">
+    <label>What is it, and what do you need from it?
+      <textarea name="description" rows="5" placeholder="Supplier invoices from our UK vendors, mostly PDFs. We need the invoice number, invoice and due dates, the supplier and their VAT number, each line item, the VAT and the total."></textarea>
+    </label>
+    <label>A sample file <span class="muted">— optional; read like a real upload, not stored</span>
+      <input type="file" name="sample" accept="image/*,application/pdf">
+    </label>
+    <label>…or paste a sample's text <span class="muted">— optional</span>
+      <textarea name="sample_text" rows="5" spellcheck="false" class="code"></textarea>
+    </label>
+    <button type="submit">Draft it <span class="htmx-indicator">· drafting, about 30 seconds…</span></button>
+  </form>
+  <div id="ai-result"></div>
+</section>
+
+<section class="card">
+  <h2>Or write it yourself</h2>
+  <form hx-post="/panel/new" hx-target="#problems" hx-disabled-elt="find button">
+    <label>Definition (YAML)
+      <textarea name="text" rows="18" spellcheck="false" class="code">{{ text }}</textarea>
+    </label>
+    <button type="submit">Create draft</button>
+  </form>
+  <div id="problems"></div>
+</section>
 {% endblock %}

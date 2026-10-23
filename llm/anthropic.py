@@ -109,13 +109,37 @@ class AnthropicExtractor:
         return self._client
 
     def extract(self, *, json_schema: dict, text: str, doc_type: str) -> ExtractionResult:
+        return self.complete(
+            system=SYSTEM_PROMPT,
+            user=_user_message(doc_type, text),
+            json_schema=json_schema,
+            params={"doc_type": doc_type},
+        )
+
+    def complete(
+        self,
+        *,
+        system: str,
+        user: str,
+        json_schema: dict,
+        max_tokens: int = MAX_TOKENS,
+        params: dict | None = None,
+    ) -> ExtractionResult:
+        """
+        One structured-output call: any system prompt, any schema.
+
+        Extraction is one use; drafting a processor (doctypes.drafting) is
+        another. Both need the same things from a call -- the spend captured
+        even when the answer is unusable, and failures sorted into worth
+        retrying and not -- so they share this rather than each having its own.
+        """
         started = time.perf_counter()
         try:
             response = self.client.messages.create(
                 model=self.model,
-                max_tokens=MAX_TOKENS,
-                system=SYSTEM_PROMPT,
-                messages=[{"role": "user", "content": _user_message(doc_type, text)}],
+                max_tokens=max_tokens,
+                system=system,
+                messages=[{"role": "user", "content": user}],
                 output_config={"format": {"type": "json_schema", "schema": json_schema}},
             )
         except anthropic.RateLimitError as exc:
@@ -154,7 +178,7 @@ class AnthropicExtractor:
             cost_usd=price(self.model, response.usage),
             latency_ms=int((time.perf_counter() - started) * 1000),
             stop_reason=response.stop_reason,
-            params={"max_tokens": MAX_TOKENS, "thinking": "off", "doc_type": doc_type},
+            params={"max_tokens": max_tokens, "thinking": "off", **(params or {})},
         )
 
         if response.stop_reason == "refusal":
@@ -166,7 +190,7 @@ class AnthropicExtractor:
             # Truncated JSON is unparseable; more attempts at the same limit
             # will truncate identically.
             raise ExtractionRefused(
-                f"output hit max_tokens ({MAX_TOKENS}); schema too large", spent=billed
+                f"output hit max_tokens ({max_tokens}); schema too large", spent=billed
             )
 
         payload = next((b.text for b in response.content if b.type == "text"), None)

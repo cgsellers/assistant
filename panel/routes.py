@@ -36,7 +36,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from api.routes.auth import set_session_cookie
 from api.routes.documents import check_upload
-from api.routes.processors import get_extractor, get_ocr_engine
+from api.routes.processors import get_drafter, get_extractor, get_ocr_engine
 from core import repository, users
 from core.auth import SESSION_COOKIE, Principal, Role, require_principal, require_role
 from core.db import get_session
@@ -248,6 +248,33 @@ def create_new(
     spec = authoring.join_edit(text, "")
     row = authoring.create_draft(session, spec, based_on=None, created_by=principal.label)
     return _go(f"/panel/processors/{row.name}/versions/{row.version}/edit")
+
+
+@router.post("/new/ai", response_class=HTMLResponse)
+def draft_with_ai(
+    request: Request,
+    description: str = Form(""),
+    sample_text: str = Form(""),
+    sample: UploadFile | None = File(None),
+    session: Session = Depends(get_session),
+    drafter=Depends(get_drafter),
+    engine=Depends(get_ocr_engine),
+    principal: Principal = Depends(_AUTHOR),
+):
+    """
+    A model drafts the processor from a description and, optionally, a
+    sample -- a file read the way the pipeline reads documents, or pasted
+    text. The result is a draft to review, never live and never with code.
+    """
+    from doctypes import drafting
+
+    data = sample.file.read() if sample is not None else b""
+    text = authoring.text_from_file(data, check_upload(data), engine) if data else sample_text
+    outcome = drafting.draft(
+        session, description=description, sample=text,
+        created_by=f"{principal.label} (ai draft)", drafter=drafter,
+    )
+    return _fragment(request, "_drafted.html", outcome=outcome)
 
 
 @router.post("/processors/{name}/versions/{version}/draft")

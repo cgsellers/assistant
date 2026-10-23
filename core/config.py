@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     # fallback. Configured rather than hard-coded because the phase 3 eval
     # harness has to run the same documents through different tiers.
     extraction_model: str = "claude-haiku-4-5"
+    # Drafting a processor is rare and its quality matters more than its
+    # price -- one draft saves an author an hour -- so it gets a stronger tier.
+    drafting_model: str = "claude-sonnet-5"
 
     # Labelled receipts for the eval harness. Under data/ because that is
     # already gitignored: real receipts carry real vendor names, tax ids and

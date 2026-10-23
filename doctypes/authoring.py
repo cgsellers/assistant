@@ -177,7 +177,7 @@ def to_yaml(stored: dict | Definition) -> str:
             {"type": rule.type, **dumped}
             for rule, dumped in zip(definition.rules, data["rules"], strict=True)
         ]
-    return _dump(data)
+    return dump_yaml(data)
 
 
 def editable(stored: dict | Definition) -> tuple[str, str]:
@@ -191,7 +191,7 @@ def editable(stored: dict | Definition) -> tuple[str, str]:
     code = ""
     if isinstance(data.get("transform"), dict):
         code = data["transform"].pop("code", "")
-    return _dump(data), code
+    return dump_yaml(data), code
 
 
 def join_edit(text: str, code: str) -> dict:
@@ -213,7 +213,8 @@ def join_edit(text: str, code: str) -> dict:
     return spec
 
 
-def _dump(data: dict) -> str:
+def dump_yaml(data: dict) -> str:
+    """Any spec as seed-style YAML, valid or not -- for showing a draft to fix."""
     return yaml.dump(data, Dumper=_SeedDumper, sort_keys=False, allow_unicode=True, width=88)
 
 

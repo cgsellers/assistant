@@ -319,7 +319,9 @@ reading stays in `raw_json` untouched. [DESIGN §5.23](docs/DESIGN.md).
 
 **Processors are authored in the panel** (`/panel`: sign in, see every processor, its
 version history, each version as YAML, and a diff between any two) **or over the API**,
-which the panel sits on:
+which the panel sits on. A new one can be **drafted by a model** from a plain-language
+description and a sample: data only, never code, landing as a draft to review, try and
+publish (`POST /processors/draft-with-ai`).
 
 | | |
 |---|---|

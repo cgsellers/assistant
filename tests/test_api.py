@@ -218,6 +218,7 @@ class TestOpenApi:
             "/auth/logout",
             "/auth/me",
             "/processors",
+            "/processors/draft-with-ai",
             "/processors/{name}",
             "/processors/{name}/versions/{version}",
             "/processors/{name}/versions/{version}/publish",

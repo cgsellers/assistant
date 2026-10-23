@@ -1,0 +1,27 @@
+{% if outcome.row %}
+<div class="drafted" role="status">
+  <p class="ok">Drafted <strong>{{ outcome.row.name }}</strong> v{{ outcome.row.version }}{% if outcome.attempts > 1 %} (the first attempt had problems; the second fixed them){% endif %}.</p>
+  {% if outcome.notes %}
+  <p><strong>Check before publishing:</strong> {{ outcome.notes }}</p>
+  {% endif %}
+  <div class="actions">
+    <a class="button" href="/panel/processors/{{ outcome.row.name }}/versions/{{ outcome.row.version }}/edit">Review the draft</a>
+    <a class="button secondary" href="/panel/processors/{{ outcome.row.name }}/versions/{{ outcome.row.version }}/try">Try it on a document</a>
+  </div>
+  <p class="muted">{{ outcome.model }} · ${{ outcome.cost_usd }} · {{ outcome.attempts }} call{{ "" if outcome.attempts == 1 else "s" }}</p>
+</div>
+{% else %}
+<div class="problem" role="alert">
+  <p class="error">The draft still didn't validate after a repair attempt, so nothing was saved. Here it is to finish by hand:</p>
+  <ul class="problems">{% for p in outcome.problems %}<li><code>{{ p }}</code></li>{% endfor %}</ul>
+  {% if outcome.notes %}<p><strong>The model's notes:</strong> {{ outcome.notes }}</p>{% endif %}
+  {% if outcome.yaml %}
+  <form hx-post="/panel/new" hx-target="#ai-problems" hx-disabled-elt="find button">
+    <textarea name="text" rows="18" spellcheck="false" class="code">{{ outcome.yaml }}</textarea>
+    <button type="submit">Create draft from this</button>
+  </form>
+  <div id="ai-problems"></div>
+  {% endif %}
+  <p class="muted">{{ outcome.model }} · ${{ outcome.cost_usd }} · {{ outcome.attempts }} calls</p>
+</div>
+{% endif %}

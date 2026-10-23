@@ -462,3 +462,60 @@ class TestRetiring:
         assert "/panel/processors/invoice/retire" not in signed_in.get(
             "/panel/processors/invoice"
         ).text
+
+
+# --- Draft with AI (1.6) ------------------------------------------------------
+
+
+class TestDraftWithAi:
+    @pytest.fixture
+    def drafter(self):
+        from api.routes import processors as api_processors
+
+        from .test_drafting import GOOD, FakeDrafter
+
+        fake = FakeDrafter(GOOD, GOOD)
+        app.dependency_overrides[api_processors.get_drafter] = lambda: fake
+        yield fake
+        app.dependency_overrides.pop(api_processors.get_drafter, None)
+
+    def test_the_new_page_offers_it_first(self, signed_in):
+        page = signed_in.get("/panel/new").text
+        assert page.index("Draft it with AI") < page.index("Or write it yourself")
+
+    def test_a_drafted_processor_links_to_its_review(self, signed_in, htmx, drafter):
+        response = signed_in.post(
+            "/panel/new/ai", data={"description": "Purchase orders."}, headers=htmx
+        )
+        assert response.status_code == 200
+        assert "Drafted <strong>purchase_order</strong> v1" in response.text
+        assert "/panel/processors/purchase_order/versions/1/edit" in response.text
+        assert "Check the PO label" in response.text
+
+    def test_a_failed_draft_hands_over_the_yaml_to_finish(self, signed_in, htmx):
+        import copy
+
+        from api.routes import processors as api_processors
+
+        from .test_drafting import GOOD, FakeDrafter
+
+        broken = copy.deepcopy(GOOD)
+        broken["patterns"] = ["(unclosed"]
+        app.dependency_overrides[api_processors.get_drafter] = lambda: FakeDrafter(broken, broken)
+        try:
+            response = signed_in.post(
+                "/panel/new/ai", data={"description": "Purchase orders."}, headers=htmx
+            )
+        finally:
+            app.dependency_overrides.pop(api_processors.get_drafter, None)
+        assert "nothing was saved" in response.text
+        assert 'hx-post="/panel/new"' in response.text
+        assert "name: purchase_order" in response.text
+
+    def test_the_sample_text_reaches_the_model(self, signed_in, htmx, drafter):
+        signed_in.post(
+            "/panel/new/ai",
+            data={"description": "Purchase orders.", "sample_text": "PURCHASE ORDER PO-77"},
+            headers=htmx,
+        )
+        assert "PURCHASE ORDER PO-77" in drafter.calls[0]["user"]

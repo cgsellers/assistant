@@ -1691,6 +1691,36 @@ exist. It reports, and leaves alone:
 one case the panel can't handle: a stored version that no longer validates, so it
 doesn't route and can't be opened to start a draft.
 
+**Then Draft with AI** (`doctypes/drafting.py`), the first slice of the template agent.
+An author describes the document and what they need, optionally with a sample, and a
+stronger model tier (`claude-sonnet-5`, `DRAFTING_MODEL`) drafts the processor. What it is
+trusted with:
+
+- **It drafts data, never code.** Fields, descriptions, keywords, `required` checks and
+  the ledger mapping all go through the same validation as a person's YAML. It never
+  writes a transform, because transforms are code the server runs, and people write
+  them (§5.23). Needed arithmetic goes in its notes for a person to write.
+- **Two lessons are enforced in code, whatever the model answers.** Top-level fields are
+  always nullable, and "must be present" becomes a `required` rule (§7.12: a forced
+  amount gets invented). The minimum routing score is the seeds' 0.2.
+- **One repair, then a person.** A draft that fails validation, or takes a name already
+  in use, goes back to the model with the exact problems, once. If it fails again,
+  nothing is saved and the author gets the YAML with the problems listed, to finish by
+  hand.
+- **It lands as an unpublished draft**, marked `(ai draft)` in `created_by`, behind the
+  same trial runs and publish checks as anything else.
+
+The model answers in a schema built for drafting rather than `Definition`'s own. That one
+keys fields by name, and a structured-output schema can't have dynamic keys. It also has
+no nullable values, so it never nears the 16-union limit itself.
+
+Checked live: described as purchase orders and given an invoice as the sample, the draft
+validated first time, for $0.025. Its descriptions were label-based and ended "Null if
+not printed". It noticed the sample was an invoice, left out the ledger mapping because a
+purchase order is not a payment, and flagged that a missing line amount would need a
+transform. Drafting calls are not yet in the cost report, because there is no document
+to attach them to, like the analyst's (§8.7).
+
 ### 9.2 Why Postgres
 
 SQLite was right for getting started: nothing to run, and a suite of almost 800 tests in
@@ -1812,6 +1842,11 @@ connect, start with [WALKTHROUGH.md](WALKTHROUGH.md).
   signing out, disabling someone or changing a password has to take effect now. A JWT
   can't be revoked without a denylist, and a denylist puts the database lookup back.
   Server-side sessions give that for one indexed query.
+- **You let a model write processors?** §9.1. It drafts data, never code: fields,
+  descriptions and keywords, checked by the same validation as a person's work. The
+  lessons that matter are enforced in code rather than asked for. It gets one repair
+  attempt with the exact problems, and the result is an unpublished draft a person
+  trial-runs and publishes. The transform, the one part that runs code, stays human.
 - **You store Python in the database and run it?** §5.23. People write it, not the model,
   so it gets containment rather than a sandbox: a separate interpreter, stdlib only, no
   environment, a time limit. Examples run before a version is stored, and everything it

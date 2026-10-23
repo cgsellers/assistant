@@ -148,3 +148,18 @@ def test_a_trial_on_an_uploaded_sample_is_read_and_not_ingested(client, session,
 
 def test_it_needs_a_key_like_everything_else(anon_client):
     assert anon_client.get("/processors").status_code == 401
+
+
+def test_draft_with_ai_returns_the_saved_draft(client):
+    from .test_drafting import GOOD, FakeDrafter
+
+    app.dependency_overrides[processors.get_drafter] = lambda: FakeDrafter(GOOD)
+    try:
+        response = client.post("/processors/draft-with-ai", json={"description": "POs."})
+    finally:
+        app.dependency_overrides.pop(processors.get_drafter, None)
+    body = response.json()
+    assert response.status_code == 200
+    assert body["draft"]["name"] == "purchase_order"
+    assert body["draft"]["created_by"] == "key:test suite (ai draft)"
+    assert body["problems"] == []

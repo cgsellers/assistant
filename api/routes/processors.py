@@ -49,6 +49,14 @@ def get_ocr_engine():
     return get_engine()
 
 
+def get_drafter():
+    """The model that drafts processors: a stronger tier than extraction."""
+    from core.config import get_settings
+    from llm import get_extractor as build
+
+    return build(get_settings().drafting_model)
+
+
 # Drafting and trying are author work; publishing and retiring put code live
 # or take a processor away from live traffic, so they need an admin.
 _AUTHOR = require_role(Role.AUTHOR)
@@ -101,6 +109,25 @@ class DraftIn(DefinitionIn):
         default=None,
         description="The published version this edits; omit for a new processor",
     )
+
+
+class DraftWithAiIn(BaseModel):
+    description: str = Field(description="What the document is and what you need from it")
+    sample_text: str | None = Field(
+        default=None, description="Optional: a sample's text, so labels match real documents"
+    )
+
+
+class DraftedOut(BaseModel):
+    """Either `draft` is set, or `yaml` and `problems` say what still needs fixing."""
+
+    draft: VersionDetail | None
+    yaml: str | None
+    problems: list[str]
+    notes: str
+    model: str
+    cost_usd: Decimal
+    attempts: int
 
 
 class TrialIn(BaseModel):
@@ -220,6 +247,35 @@ def create_draft(
         session, body.spec(), based_on=body.based_on_version, created_by=who
     )
     return _detail(row)
+
+
+@router.post(
+    "/draft-with-ai", response_model=DraftedOut, summary="Have a model draft a processor"
+)
+def draft_with_ai(
+    body: DraftWithAiIn,
+    session: Session = Depends(get_session),
+    drafter=Depends(get_drafter),
+    who: str = Depends(author),
+):
+    """
+    Describe the document in plain language; a model drafts the processor and
+    it is saved as a draft for a person to review, try and publish. Never with
+    a transform: code is written by people. If the draft does not validate
+    after one repair attempt, nothing is saved and the YAML comes back with
+    its problems, to fix by hand.
+    """
+    from doctypes import drafting
+
+    outcome = drafting.draft(
+        session, description=body.description, sample=body.sample_text,
+        created_by=f"{who} (ai draft)", drafter=drafter,
+    )
+    return DraftedOut(
+        draft=_detail(outcome.row) if outcome.row is not None else None,
+        yaml=outcome.yaml, problems=outcome.problems, notes=outcome.notes,
+        model=outcome.model, cost_usd=outcome.cost_usd, attempts=outcome.attempts,
+    )
 
 
 @router.put(
