@@ -86,7 +86,8 @@ fields:
     type: money
     description: >-
       The amount before tax and discount, labelled Subtotal or Sub-total.
-      Null if not printed. Copy it; never compute it.
+      Null if not printed -- including when only a total is printed. Never
+      work it out from the line items or from the total.
 
   discount:
     type: money
@@ -97,10 +98,12 @@ fields:
   tax_amount:
     type: money
     description: >-
-      The total tax as one printed figure, labelled Tax, VAT, GST, Sales Tax
-      or Total Tax. If the invoice lists more than one tax and prints no
-      combined tax line, null -- each tax goes in `taxes` instead. The amount,
-      not the rate. Never add taxes together.
+      The tax charged, as one printed figure, labelled Tax, VAT, GST, Sales
+      Tax or Total Tax. If exactly one tax is printed, that tax's amount (it
+      also goes in `taxes`). If several are printed with a combined tax line,
+      the combined figure. If several are printed with no combined line,
+      null -- they go in `taxes` and are added up later, not here. The
+      amount, not the rate.
 
   # Every tax as printed, so an invoice charging GST and VAT separately loses
   # nothing and nobody adds them up but code. The ledger's tax is their sum
