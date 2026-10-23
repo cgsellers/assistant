@@ -429,6 +429,10 @@ The provider layer, tool registry, budgets, tracing, and evals all live *outside
 graph. LangGraph arrives in phase 5 for what it is genuinely good at: batch fan-out,
 conditional edges, and interrupt/resume at human review with checkpointing.
 
+Since the roadmap was reordered (§9), only where it earns that. The `jobs` table already
+fans out and review is a status, so the candidate is the template agent's draft → trial →
+revise loop, adopted if it measures better than a plain loop.
+
 ### 5.20 A document type is data, not code
 
 The original design gave each document type a Python module satisfying a `DocumentType`
@@ -1502,7 +1506,7 @@ from what exists.
 row carries tokens, cost and latency, and `python -m core.costs` / `GET /costs` read them
 back: total, wasted, per document, by model and type, latency percentiles. See 7.9.
 Still not covered: the analyst agent's calls, which are reported on each `Answer` but not
-persisted. `runs`/`steps` for multi-call traces remain phase 5.
+persisted. `runs`/`steps` for multi-call traces are roadmap step 6.
 
 **8.8 Security posture is incomplete, but no longer open.** Uploads are size-capped and
 type-checked, paths are derived from content hashes rather than user-supplied filenames
@@ -1515,41 +1519,108 @@ so any caller that gets in sees everything.
 
 ## 9. Roadmap
 
-| Phase | Ships | Demonstrates |
-|---|---|---|
-| 1 | Upload → dedup → OCR → stored text; status tracking; event log | Backend fundamentals, idempotency |
-| **2** | Document types as data + `receipt`: routing, schema-enforced extraction, validator, mapper | Core pipeline end to end |
-| **3** | Eval harness on labeled receipts; per-field accuracy and cost per document | Measurement before optimisation |
-| 4 | Vision fallback escalation, review queue with corrections, `invoice` type | Cost engineering, human-in-the-loop |
-| 5 | LangGraph: batch fan-out, conditional edges, interrupt/resume at review, reprocessing | Orchestration where justified |
-| 6 | Processor authoring: an API and a panel to create, version, publish and retire processors, with a trial run on a sample document and user accounts (§9.1). Then template-as-code: the model drafts processors and per-vendor parsers in a sandbox, verified before promotion | Self-serve document types; removing the model from the hot path |
-| **7** | Analyst agent over `transactions`: read-only tools, citations, approval gate | Agent design as a data consumer |
-| 8 | Outbox + integrations (CSV, then accounting API); UI | Production shape |
+Reordered on 2026-10-23, once phases 1–3 and 7 had shipped. The old phase numbers are
+kept in brackets, so earlier sections that say "phase 6" still point somewhere.
 
-Phase 3 deliberately precedes phase 5 — see 5.18.
+**Done**
+
+| Phase | Shipped |
+|---|---|
+| 1 | Upload → dedup → OCR → stored text; status tracking; event log |
+| 2 | Processors as data: routing, schema-enforced extraction, validation, ledger mapping; transforms (§5.23) |
+| 3 | Eval harness: per-field accuracy, cost per document, a held-out set (§7.14) |
+| 4, in part | The `invoice` type; born-digital PDFs read from their text layer (§7.11) |
+| 7 | Analyst agent over `transactions`: read-only tools, citations, approval gate |
+
+**Next, in order**
+
+| Step | Ships | Done when | Demonstrates |
+|---|---|---|---|
+| **1** (phase 6a) | Processor authoring: API, panel, user accounts, trial runs, versions, publish and retire (§9.1) | A new layout gets a published processor without anyone touching YAML | Self-serve document types; auth for people |
+| **2** | Deployable: Postgres, compose for every service, a readiness check, a hosted demo on synthetic data (§9.2) | A public URL, and the suite passing on Postgres in CI | Production shape, early |
+| 3 (phase 4) | Review queue and corrections; corrections become eval labels; probable-duplicate detection (§8.6); reprocessing after a publish | No document sits in review without a way to fix it | Human in the loop; labels from use |
+| 4 (phase 4) | A model classifier when no keyword matches; vision fallback for photos that fail their rules; each tier measured | A table of share, accuracy and cost per tier | Cost engineering |
+| 5 (phases 5, 6b) | A template agent that drafts processors through the authoring API, scored on a fresh holdout. LangGraph only if the draft → trial → revise loop needs it | An agent-drafted processor reaches a stated accuracy on unseen layouts and is published after review | Agents, measured; orchestration where justified |
+| 6 (phase 8) | Outbox with CSV export, then an accounting API sandbox; per-document traces; rate limiting; PII redaction before analyst context | Exports retry safely; every model call on a document is visible | Production shape |
+| Stretch (phase 6) | Generated deterministic parsers for recurring born-digital vendors, in a real sandbox | | Removing the model from the hot path |
+
+**Why this order.**
+
+- **Authoring comes first** because steps 3 and 5 reuse its screens, users and API.
+- **Deploying comes second** because moving from SQLite to Postgres gets riskier the more
+  is built on SQLite, and a live demo is worth more early than late.
+- **Review comes before cost tiers** because the queue shows what is actually failing,
+  and corrections supply fresh labels to measure the tiers against.
+- **LangGraph changed role.** It was promised as phase 5, for batch fan-out and
+  interrupt/resume at review. The `jobs` table already does fan-out, and review is a
+  status rather than a paused process. So LangGraph is now tied to the one genuinely
+  multi-step workflow, the template agent's loop, and adopted only if it measures better
+  than a plain loop (§5.19).
 
 ### 9.1 The processor panel
 
 The panel is for the people who write processors, so they don't have to edit YAML and
-re-run the seed. Four decisions are already settled:
+re-run the seed. Decided:
 
-- **API first, panel second.** Endpoints in the FastAPI app do the work: list, show a
-  version, create a version, publish, retire, and trial-run against a sample document.
-  The panel, the phase-6 drafting agent and the tests all call the same endpoints, so
-  validation lives in one place: `Definition`, the nullable cap and the transform
-  examples.
-- **Not Django.** Django admin would need a second ORM mapped onto tables that SQLAlchemy
-  and Alembic already own, and models that drift apart. Its default edit and delete also
-  do the wrong thing here, so they would be overridden anyway. A SQLAlchemy-native admin
-  (e.g. sqladmin) or a small page built from `Definition.model_json_schema()` fits the
-  stack.
+- **API first, panel second.** Plain functions in `doctypes/authoring.py` do the work:
+  draft, publish, retire, trial-run. The JSON API, the panel and the phase-6 drafting
+  agent all call them, so validation lives in one place: `Definition`, the nullable cap
+  and the transform examples. The API's shape can change without touching the rules.
+- **Server-rendered: FastAPI with Jinja2 and HTMX.** The pages run in the same process
+  and call the same functions. There is no JavaScript build: CodeMirror for the YAML and
+  Python editors comes from a CDN. What you edit is exactly the seed format, so nothing
+  maps a form onto YAML. A single screen moves to a richer frontend if it ever outgrows
+  this. Rejected:
+  - **Django admin**: a second ORM over tables SQLAlchemy and Alembic own, and edit and
+    delete buttons that do the wrong thing here.
+  - **sqladmin**: one JSON text box for the whole definition, and it writes to the
+    database around the rules.
+  - **A React app**: a second language and build chain for a handful of trusted authors.
 - **Edit means a new version, delete means retire.** `document_types` is append-only
-  because extractions cite the version that produced them. A real delete would orphan
-  them. Retiring deactivates the type: it stops routing and keeps its history.
-- **It needs real users.** The panel saves Python that the worker runs, which makes it a
-  code-execution privilege. The static machine key (§5.22) is not enough for that: it
-  needs per-person accounts, a role allowed to edit transforms, and `created_by` on every
-  version. That is the trigger §5.22 named for revisiting auth.
+  because extractions cite the version that produced them, and a real delete would
+  orphan them. Retiring deactivates the type: it stops routing and keeps its history.
+- **Every version records what it was based on.** `based_on_version` and `created_by`.
+  Publishing refuses if the base is no longer the active version, and shows what changed
+  instead. This is optimistic concurrency against lost updates: two tabs, two people, or
+  the drafting agent writing while someone edits.
+- **Seeds create, never update, once the panel ships.** From then on the panel is the
+  only way to change an existing processor, so a deploy can never quietly revert an
+  edit. `doctypes/seeds/` remains the starter set for a fresh database (laptops, CI,
+  tests). It is not production's copy, and it will fall behind; an export button can
+  come when that matters.
+- **It needs real users.** The panel saves Python the worker runs, which makes editing a
+  code-execution privilege. The static machine key (§5.22) stays for machines. People
+  get accounts, password hashes and a session, with two roles: *author* (drafts and
+  trial runs) and *admin* (publishing, which puts code live). This is the trigger §5.22
+  named for revisiting auth.
+
+### 9.2 Why Postgres
+
+SQLite was right for getting started: nothing to run, and a suite of almost 800 tests in
+under seven seconds. It isn't slow, and for a single-user tool on one machine it would
+still be the right choice. The roadmap changes the conditions:
+
+- **Several writers on several machines.** SQLite allows one writer at a time, on one
+  disk. WAL mode and a five-second busy timeout cover one API and one worker. More
+  workers, several panel users, the drafting agent and reprocessing batches don't fit.
+  A worker on a second machine can't share the file, and hosting pins it to one
+  instance.
+- **The queue.** `SELECT … FOR UPDATE SKIP LOCKED` lets many workers claim different jobs
+  at once. On SQLite, claims take turns.
+- **Money, measured.** SQLite has no exact decimal type: `NUMERIC` stores money as a binary
+  float, so SQL sums are float sums. `SELECT sum(a)` over 1.10 and 2.20 returns
+  `3.3000000000000003`. The analyst's per-vendor totals are summed in SQL, and they come
+  back right only because SQLAlchemy rounds to the column's four places. That is correct
+  by rounding, against the rule that money is never a float. Postgres `NUMERIC` is exact.
+- **The database enforces what we currently enforce by hand.** Foreign keys are off by
+  default, so `core/db.py` turns them on at every connection. There's no timezone-aware
+  timestamp, hence `UTCDateTime` and the bug in §5.9. Columns can't be altered in place,
+  hence batch-mode migrations. SQLite also accepts a string in an integer column.
+- **A read-only database user for the analyst.** Its tools only read. With Postgres, its
+  connection can only read too, so one bug or prompt injection can't write.
+
+The cost is one more service (a managed free tier is enough for the demo), and a CI job
+running the suite on Postgres so the two dialects can't drift apart unnoticed.
 
 ---
 

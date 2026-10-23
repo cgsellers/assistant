@@ -339,18 +339,23 @@ short of the ledger, which is right for one an analyst is still shaping.
 
 ## Roadmap
 
-| Phase | Ships | Demonstrates |
-|---|---|---|
-| 1 | Upload → sha256 dedup → OCR → stored text; status tracking; event log | Backend fundamentals, idempotency |
-| 2 | Document types as data + `receipt`: routing, schema-enforced extraction, validator, mapper | Core pipeline end to end |
-| 3 | Eval harness on labeled receipts; per-field accuracy and cost per document | Measurement before optimization |
-| 4 | Vision fallback escalation, review queue with corrections, `invoice` type | Cost engineering, human-in-the-loop |
-| 5 | LangGraph orchestration: batch fan-out, conditional edges, interrupt/resume at review, reprocessing | Orchestration where justified |
-| 6 | Processor authoring: API + panel to create, version, publish and retire processors, trial-run on a sample, user accounts. Then template-as-code: the model drafts processors and vendor parsers in a sandbox, verified before promotion | Self-serve document types; removing the model from the hot path |
-| 7 | Analyst agent over `transactions`: read-only tools, citations, approval gate; persistent chat | Agent design as a data consumer |
-| 8 | Outbox + integrations (CSV, then accounting API); UI with upload, review queue, trace view | Production shape |
+**Shipped:** ingestion and OCR (phase 1); processors as data, with routing, extraction,
+validation, transforms and the ledger (2); the eval harness with a held-out set (3); the
+`invoice` type and PDF text layers (part of 4); the analyst agent (7).
 
-Phase 3 comes before phase 5 deliberately: the eval harness exists before the multi-agent layer, so the README can show before/after numbers.
+**Next, in order** (reordered after phases 1–3 and 7 shipped; [DESIGN §9](docs/DESIGN.md)):
+
+| Step | Ships | Demonstrates |
+|---|---|---|
+| 1 | Processor authoring: API, panel, user accounts, trial runs, versions, publish and retire | Self-serve document types |
+| 2 | Deployable: Postgres, compose, readiness check, a hosted demo on synthetic data | Production shape, early |
+| 3 | Review queue and corrections; corrections become eval labels; duplicate detection; reprocessing | Human in the loop |
+| 4 | Model classifier when no keyword matches; vision fallback; each tier's share, accuracy and cost measured | Cost engineering |
+| 5 | Template agent drafting processors through the authoring API, scored on a fresh holdout; LangGraph only if its loop needs it | Agents, measured |
+| 6 | Outbox, CSV export, an accounting API sandbox; per-document traces; rate limiting; PII redaction | Production shape |
+
+The eval harness came before any orchestration, so every later step is argued with
+before/after numbers rather than asserted.
 
 ## Stack
 
@@ -360,7 +365,7 @@ Phase 3 comes before phase 5 deliberately: the eval harness exists before the mu
 - **Queue:** DB-backed `jobs` table polled by a worker (Redis later if needed)
 - **OCR:** self-hosted, behind an `OcrEngine` protocol, in its own container (PP-OCR models on ONNX Runtime; Tesseract as test double). Born-digital PDFs skip it: their embedded text layer is read directly, exactly, in milliseconds
 - **Models:** Anthropic API behind an `Extractor` protocol, using structured outputs; cheap tier for extraction, strong tier for fallback and analysis
-- **Orchestration:** LangGraph (phase 5+)
+- **Orchestration:** LangGraph, if the template agent's loop earns it (roadmap step 5)
 - **Infra:** Docker Compose
 
 ## Design decisions and tradeoffs
