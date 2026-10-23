@@ -1353,6 +1353,22 @@ in response to this set, **its routing number is spent**: a routing claim afterw
 needs fresh templates (15 FATURA templates remain unused). The extraction number stays
 valid for as long as extraction isn't changed because of it.
 
+**Fixed afterwards.** Keywords now match whole words, where only a letter counts as
+part of a word, since OCR glues digits on (*IVA21%*). Types are now ranked by how many of
+their signals hit, and the share breaks ties; the share still decides whether a type
+matches at all. Whole words alone would have cost all nine Italian receipts that routed,
+so the receipt type gained `totale`. Routing-only, on cached OCR text:
+
+| | Before | After |
+|---|---|---|
+| Receipts (20) | 9 | 9 |
+| Invoices, tuning (20) | 17 | 17 |
+| Invoices, holdout (15) | 12 | 14 *(spent: not a claim)* |
+
+The remaining invoice misses (t06, t16, t27 and holdout t20) print "invoice" and no other
+invoice keyword. One hit is not enough by design, so those need either more keywords or
+the model-classifier fallback, not a looser threshold.
+
 ---
 
 ## 8. Known gaps and deferred work

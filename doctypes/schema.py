@@ -133,30 +133,57 @@ def match_score(definition: Definition, ocr_text: str) -> float:
     How strongly this text looks like this document type, 0.0 to 1.0.
 
     Deterministic and free, so every registered type can be scored on every
-    document and the highest scorer above its own `min_score` wins. A model
-    classifier is only needed when nothing matches.
+    document. A model classifier is only needed when nothing matches.
 
     `require_all` is a gate rather than a contributor: if any of those terms is
     missing the answer is zero, however many other keywords hit.
+    """
+    return match_evidence(definition, ocr_text)[1]
+
+
+def match_evidence(definition: Definition, ocr_text: str) -> tuple[int, float]:
+    """
+    `(hits, score)`: how many signals fired, and that as a share of the type's
+    signals. Both are zero when the type falls below its own `min_score`.
+
+    The share decides whether a type matches at all; the hit count decides
+    between types that do. Comparing shares across types punished the
+    thorough one: two hits are 2/9 for the invoice type and 2/8 for the
+    receipt type, so an invoice with one stray receipt word went to receipt.
     """
     matchers = definition.matches
     haystack = _normalise(ocr_text)
 
     if matchers.require_all and not all(
-        _normalise(term) in haystack for term in matchers.require_all
+        _has_word(term, haystack) for term in matchers.require_all
     ):
-        return 0.0
+        return 0, 0.0
 
     signals = len(matchers.keywords) + len(matchers.patterns)
     if signals == 0:
         # Only require_all was declared, and it passed.
-        return 1.0 if matchers.require_all else 0.0
+        return (len(matchers.require_all), 1.0) if matchers.require_all else (0, 0.0)
 
-    hits = sum(1 for k in matchers.keywords if _normalise(k) in haystack)
+    hits = sum(1 for k in matchers.keywords if _has_word(k, haystack))
     hits += sum(1 for p in matchers.patterns if re.search(p, ocr_text, re.IGNORECASE))
 
     score = hits / signals
-    return score if score >= matchers.min_score else 0.0
+    return (hits, score) if score >= matchers.min_score else (0, 0.0)
+
+
+def _has_word(keyword: str, haystack: str) -> bool:
+    """
+    The keyword as a whole word or phrase, not as part of a longer word.
+
+    A substring match let the receipt keyword `iva` fire on "Sullivan" in a
+    customer's name and "rivassarah" in an email address, and send two English
+    invoices to the receipt type. Only letters count as "part of a word":
+    OCR glues digits on ("IVA21%"), and that is still the word. Patterns are
+    left alone -- their author writes the boundaries they want.
+    """
+    letter = r"[^\W\d_]"
+    pattern = rf"(?<!{letter}){re.escape(_normalise(keyword))}(?!{letter})"
+    return re.search(pattern, haystack) is not None
 
 
 def _normalise(text: str) -> str:

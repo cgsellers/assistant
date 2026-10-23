@@ -157,6 +157,33 @@ class TestRouting:
         assert result is not None
         assert result.definition.name == "invoice"
 
+    def test_more_evidence_beats_a_higher_share(self, session):
+        """
+        Ranking by share punished a type for being thorough: 2 of 9 lost to
+        2 of 8. Four hits out of six is more evidence than one out of one.
+        """
+        _register(session, _definition("terse", keywords=["factura"]))
+        _register(
+            session,
+            _definition(
+                "thorough",
+                keywords=["factura", "base imponible", "iva", "total", "albaran", "ticket"],
+            ),
+        )
+
+        result = registry.route(session, INVOICE_TEXT)
+        assert result is not None
+        assert result.definition.name == "thorough"
+        assert result.score == pytest.approx(4 / 6)
+
+    def test_equal_evidence_is_broken_by_share(self, session):
+        _register(session, _definition("aaa_loose", keywords=["factura", "iva", "albaran"]))
+        _register(session, _definition("zzz_tight", keywords=["factura", "iva"]))
+
+        result = registry.route(session, INVOICE_TEXT)
+        assert result is not None
+        assert result.definition.name == "zzz_tight"
+
     def test_ties_break_by_name_for_reproducibility(self, session):
         _register(session, _definition("aaa_type", keywords=["factura"]))
         _register(session, _definition("zzz_type", keywords=["factura"]))

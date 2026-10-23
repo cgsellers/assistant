@@ -3,7 +3,7 @@ Loading document types out of the database and routing a document to one.
 
 Routing is deterministic and free -- `match_score` is string and regex matching
 over OCR text -- so every registered type is scored against every document and
-the highest scorer wins. That is the whole point of keeping matchers in the
+the one with the most evidence wins. That is the whole point of keeping matchers in the
 definition: a model classifier only has to be paid for when nothing matches,
 which is what `route` returning None tells the caller.
 """
@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 
 from core.models import DocumentTypeDefinition
 from doctypes.definition import Definition, Profile
-from doctypes.schema import match_score, select_profile
+from doctypes.schema import match_evidence, select_profile
 
 log = logging.getLogger("doctypes.registry")
 
@@ -99,21 +99,10 @@ def route(session: Session, ocr_text: str) -> RouteResult | None:
     cleared its own `min_score`, and the caller should escalate to a model
     classifier (or mark the document unsupported) rather than guess.
     """
-    best: Definition | None = None
-    best_score = 0.0
-
-    for definition in active_definitions(session):
-        score = match_score(definition, ocr_text)
-        # match_score has already applied this type's own min_score and
-        # returned 0.0 below it, so anything surviving a strict `>` against a
-        # 0.0 floor is a real match. Strict rather than >= also means a tie
-        # keeps the first type in name order, which makes routing reproducible
-        # instead of dependent on row insertion order.
-        if score > best_score:
-            best, best_score = definition, score
-
-    if best is None:
+    picked = pick(active_definitions(session), ocr_text)
+    if picked is None:
         return None
+    best, best_score = picked
 
     # Only the winner's profiles are worth scanning: a profile on a type we are
     # not extracting with changes nothing.
@@ -124,6 +113,31 @@ def route(session: Session, ocr_text: str) -> RouteResult | None:
         profile=profile,
         score=best_score,
     )
+
+
+def pick(definitions: list[Definition], ocr_text: str) -> tuple[Definition, float] | None:
+    """
+    The winning type and its score, or None. Pure, so it can be run over a
+    corpus without a database.
+
+    Most signals hit wins; the share of the type's own signals breaks a tie.
+    Ranking by share alone made a type lose for having more keywords -- see
+    `match_evidence`.
+    """
+    best: Definition | None = None
+    best_key = (0, 0.0)
+
+    for definition in definitions:
+        hits, score = match_evidence(definition, ocr_text)
+        # match_evidence has already applied this type's own min_score and
+        # returned zeros below it, so anything surviving a strict `>` against
+        # a zero floor is a real match. Strict rather than >= also means a tie
+        # keeps the first type in name order, which makes routing reproducible
+        # instead of dependent on row insertion order.
+        if (hits, score) > best_key:
+            best, best_key = definition, (hits, score)
+
+    return None if best is None else (best, best_key[1])
 
 
 def _parse(row: DocumentTypeDefinition) -> Definition | None:

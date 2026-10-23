@@ -20,8 +20,12 @@ description: >-
 matches:
   # Any of these is evidence. Two independent signals are needed before a
   # document is claimed as a receipt -- see min_score below.
+  # Keywords match whole words. `totale` is here for the Italian receipts in
+  # the eval corpus, which only ever routed because `total` used to match
+  # inside TOTALE.
   keywords:
     - total
+    - totale
     - iva
     - ticket
     - efectivo
@@ -30,7 +34,7 @@ matches:
   patterns:
     - '\b[A-Z]-?\d{8}\b'      # Spanish CIF, e.g. A46103834
     - '\b\d{8}-?[A-Z]\b'      # Spanish NIF/DNI, e.g. 12345678Z
-  # 2 of the 8 signals above. One keyword alone is too thin -- "total" appears
+  # 2 of the 9 signals above. One keyword alone is too thin -- "total" appears
   # on invoices, delivery notes and bank statements -- and demanding three
   # loses the short till rolls that print little more than a total.
   min_score: 0.2

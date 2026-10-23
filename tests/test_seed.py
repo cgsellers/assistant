@@ -228,6 +228,26 @@ class TestTheInvoiceType:
         assert match_score(types["receipt"], RECEIPT_TEXT) > 0
         assert match_score(types["invoice"], RECEIPT_TEXT) == 0.0
 
+    def test_a_customer_called_sullivan_does_not_make_it_a_receipt(self):
+        """
+        The holdout failure: `iva` matched inside the name, and receipt's 2 of
+        8 outscored invoice's 2 of 9. Text shaped like FATURA template 22.
+        """
+        text = (
+            "INVOICE\nCustomer: Mark Sullivan\nsullivanmark@example.com\n"
+            "Due Date: 02-Mar-2021\nWidget 2 40.00\nTOTAL 80.00"
+        )
+        picked = registry.pick(sorted(self._types().values(), key=lambda d: d.name), text)
+        assert picked is not None
+        assert picked[0].name == "invoice"
+
+    def test_an_italian_receipt_still_routes_to_receipt(self):
+        """It used to, only because `total` matched inside TOTALE."""
+        text = "SUPERMERCATO\nDOCUMENTO COMMERCIALE\nPANE 1,20\nTOTALE COMPLESSIVO 1,20\ndi cui IVA 0,05"
+        picked = registry.pick(list(self._types().values()), text)
+        assert picked is not None
+        assert picked[0].name == "receipt"
+
     def test_total_alone_claims_nothing(self):
         """`total` is on every financial document; it identifies none of them."""
         assert match_score(self._types()["invoice"], "TOTAL 9.35") == 0.0

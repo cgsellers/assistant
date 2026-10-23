@@ -14,7 +14,7 @@ The design principle: **models only where perception or judgment is required.** 
 >
 > English invoices, on 15 layouts held out from all tuning: **100% of fields** and
 > **12/15 routed**, on clean synthetic data where 15 documents can't separate 100% from
-> ~95%. The routing failures exposed two bugs: [DESIGN §7.14](docs/DESIGN.md).
+> ~95%. The routing failures exposed two bugs, since fixed: [DESIGN §7.14](docs/DESIGN.md).
 
 > **[Walkthrough: one receipt, start to finish](docs/WALKTHROUGH.md)** — how the pieces
 > connect, file by file. Read this first.

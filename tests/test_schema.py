@@ -186,6 +186,28 @@ class TestMatchScore:
         assert match_score(d, "TOTAL 9.35") == 0.0
         assert match_score(d, "FACTURA  TOTAL 9.35") > 0
 
+    def test_a_keyword_inside_a_longer_word_does_not_count(self):
+        """`iva` in "Sullivan" sent two English invoices to the receipt type."""
+        d = _definition(matches={"keywords": ["iva"], "min_score": 0.1})
+        assert match_score(d, "Bill To: Mark Sullivan") == 0.0
+        assert match_score(d, "rivassarah@example.com") == 0.0
+        assert match_score(d, "IVA 21%") > 0
+
+    def test_punctuation_and_glued_digits_still_bound_a_word(self):
+        d = _definition(matches={"keywords": ["iva"], "min_score": 0.1})
+        assert match_score(d, "IVA:") > 0
+        assert match_score(d, "IVA21%") > 0
+
+    def test_a_phrase_matches_across_a_line_break(self):
+        d = _definition(matches={"keywords": ["bill to"], "min_score": 0.1})
+        assert match_score(d, "BILL\nTO Northwind") > 0
+
+    def test_require_all_also_matches_whole_words(self):
+        d = _definition(
+            matches={"keywords": ["total"], "require_all": ["factura"], "min_score": 0.1}
+        )
+        assert match_score(d, "FACTURAS  TOTAL 9.35") == 0.0
+
     def test_a_pattern_counts_as_a_signal(self):
         d = _definition(
             matches={"keywords": ["total"], "patterns": [r"\b[A-Z]\d{8}\b"], "min_score": 0.9}
