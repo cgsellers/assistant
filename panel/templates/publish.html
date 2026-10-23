@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% set row = preview.row %}
+{% block title %}Publish {{ row.name }} v{{ row.version }}{% endblock %}
+{% block content %}
+<p class="crumbs"><a href="/panel">Processors</a> / <a href="/panel/processors/{{ row.name }}">{{ row.name }}</a> / <a href="/panel/processors/{{ row.name }}/versions/{{ row.version }}">v{{ row.version }}</a> / publish</p>
+<h1>Publish {{ row.name }} v{{ row.version }}?</h1>
+
+{% if preview.against %}
+<p>New documents will be read with v{{ row.version }} instead of v{{ preview.against.version }}{% if not preview.against.is_active %} (retired — publishing brings {{ row.name }} back){% endif %}. Documents already extracted keep the version that read them.</p>
+{% else %}
+<p>{{ row.name }} is new: from now on, documents that match its keywords will be routed to it.</p>
+{% endif %}
+
+<ul class="checks">
+  {% if preview.conflict_with %}
+  <li class="bad">✗ v{{ preview.conflict_with }} was published after this draft was started{% if row.based_on_version %} from v{{ row.based_on_version }}{% endif %}. Publishing would undo it.
+    <a href="/panel/processors/{{ row.name }}/diff?a={{ row.based_on_version or preview.conflict_with }}&amp;b={{ preview.conflict_with }}">See what v{{ preview.conflict_with }} changed</a>, then start a new draft from it.</li>
+  {% else %}
+  <li class="good">✓ Nobody has published since this draft was started.</li>
+  {% endif %}
+  {% if preview.example_failures %}
+  <li class="bad">✗ The transform fails its examples:
+    <ul class="problems">{% for f in preview.example_failures %}<li><code>{{ f }}</code></li>{% endfor %}</ul></li>
+  {% elif row.definition.get("transform") %}
+  <li class="good">✓ The transform passes all {{ row.definition["transform"].get("examples", [])|length }} of its examples.</li>
+  {% endif %}
+  {% if preview.code_changed %}
+  <li class="warn">⚠ This changes the transform's code: new Python will run on the server for every document. Read it in the diff below before confirming.</li>
+  {% endif %}
+</ul>
+
+{% if preview.can_publish %}
+<div class="actions">
+  <button hx-post="/panel/processors/{{ row.name }}/versions/{{ row.version }}/publish" hx-target="#problems" hx-disabled-elt="this">Publish v{{ row.version }}</button>
+  <a href="/panel/processors/{{ row.name }}/versions/{{ row.version }}">Cancel</a>
+</div>
+{% else %}
+<p><a href="/panel/processors/{{ row.name }}/versions/{{ row.version }}">Back to v{{ row.version }}</a></p>
+{% endif %}
+<div id="problems"></div>
+
+{% if preview.against %}
+<h2>Changes from v{{ preview.against.version }}</h2>
+{% if lines %}
+<pre class="code diff">{% for kind, line in lines %}<span class="{{ kind }}">{{ line }}</span>
+{% endfor %}</pre>
+{% else %}
+<p class="muted">None: this draft is identical to v{{ preview.against.version }}.</p>
+{% endif %}
+{% endif %}
+{% endblock %}

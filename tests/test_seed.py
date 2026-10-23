@@ -145,7 +145,11 @@ class TestSync:
         assert actions["receipt"] == "unchanged (v1)"
         assert session.query(DocumentTypeDefinition).count() == len(definitions)
 
-    def test_an_edited_seed_writes_a_new_version(self, session):
+    def test_an_edited_seed_never_overwrites_what_is_stored(self, session):
+        """
+        The panel is where an existing processor changes. A deploy that
+        re-applied seed files would quietly undo whatever was published there.
+        """
         definitions = seed.load_seeds()
         seed.sync(session, definitions)
 
@@ -157,20 +161,35 @@ class TestSync:
         ]
         actions = seed.sync(session, edited)
 
-        assert actions["receipt"] == "updated (v2)"
+        assert "differs from the seed file, left alone" in actions["receipt"]
         active = repository.get_active_document_type(session, "receipt")
-        assert active.version == 2
-        assert active.display_name == "Till receipt"
-        # The old version is kept, because extractions reference it.
-        assert session.query(DocumentTypeDefinition).filter_by(name="receipt").count() == 2
+        assert (active.version, active.display_name) == (1, "Receipt")
+
+    def test_a_retired_processor_is_not_brought_back(self, session):
+        from doctypes import authoring
+
+        seed.sync(session, seed.load_seeds())
+        authoring.retire(session, "receipt", retired_by="t")
+
+        assert seed.sync(session, seed.load_seeds())["receipt"] == "retired, left alone"
+        assert repository.get_active_document_type(session, "receipt") is None
+
+    def test_a_processor_being_drafted_in_the_panel_is_left_alone(self, session):
+        from doctypes import authoring
+
+        receipt = next(d for d in seed.load_seeds() if d.name == "receipt")
+        authoring.create_draft(session, receipt, based_on=None, created_by="ana")
+
+        assert "drafted in the panel" in seed.sync(session, [receipt])["receipt"]
 
     def test_only_one_version_is_ever_active(self, session):
         definitions = seed.load_seeds()
         seed.sync(session, definitions)
         for i in range(3):
-            seed.sync(
+            seed.replace(
                 session,
                 [d.model_copy(update={"description": f"revision {i}"}) for d in definitions],
+                ["receipt"],
             )
 
         active = (
@@ -347,10 +366,11 @@ class TestTheNullableFieldCap:
         assert _count_nullable(fields) == 1
 
 
-def test_a_stored_definition_that_breaks_a_new_rule_is_superseded(session):
+def test_a_stored_definition_that_breaks_a_new_rule_is_reported_then_replaced(session):
     """
     Raising the bar on definitions can make a stored one invalid. The registry
-    skips it, so the type stops routing; the seed must replace it, not crash.
+    skips it, so the type stops routing, and the panel cannot open it. The
+    seed says so and names the fix; `replace` is that fix.
     """
     seed.sync(session, seed.load_seeds())
     row = repository.get_active_document_type(session, "invoice")
@@ -363,5 +383,10 @@ def test_a_stored_definition_that_breaks_a_new_rule_is_superseded(session):
     session.commit()
 
     actions = seed.sync(session, seed.load_seeds())
+    assert "no longer validates" in actions["invoice"]
+    assert "--replace invoice" in actions["invoice"]
 
-    assert actions["invoice"].startswith("updated")
+    replaced = seed.replace(session, seed.load_seeds(), ["invoice"])
+    assert replaced["invoice"] == "replaced (now v2)"
+    live = repository.get_active_document_type(session, "invoice")
+    assert (live.version, live.created_by, live.based_on_version) == (2, "seed:replace", 1)

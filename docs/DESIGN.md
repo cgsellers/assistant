@@ -1668,6 +1668,29 @@ The trial page takes a sample file, a stored document's id or pasted text, and s
 **Not done yet:** the boxes are plain text areas, so Tab moves focus instead of
 indenting. A code editor (CodeMirror) is the obvious next layer, vendored like HTMX.
 
+Then publishing and retiring, admin only, each behind a confirmation page. Before
+publishing, the page shows what `publish` would check, run the same way
+(`authoring.publish_preview`):
+- the diff against the live version;
+- a warning when the transform's code changes, because new Python will run on the
+  server;
+- the result of every example;
+- whether someone published since the draft was started.
+
+If any check fails, there is no button. Confirming runs every check again, because the
+page may be minutes old, and a conflict then comes back as a 409 beside the button.
+Retiring says what stays: every version and every extraction made with it.
+
+**The seed switch is done.** `doctypes.seed` now only creates processors that don't
+exist. It reports, and leaves alone:
+- one whose seed file differs from what is stored;
+- one that is retired;
+- one that only has drafts in the panel.
+
+`--replace NAME` is the break-glass. It publishes the seed over what is stored, for the
+one case the panel can't handle: a stored version that no longer validates, so it
+doesn't route and can't be opened to start a draft.
+
 ### 9.2 Why Postgres
 
 SQLite was right for getting started: nothing to run, and a suite of almost 800 tests in

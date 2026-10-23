@@ -402,7 +402,7 @@ cd ledgerline
 uv sync                            # creates .venv, installs from uv.lock
 cp .env.example .env               # ANTHROPIC_API_KEY is only needed from phase 2 on
 uv run alembic upgrade head        # creates ./data/ledgerline.db
-uv run python -m doctypes.seed     # loads the shipped document types
+uv run python -m doctypes.seed     # creates the starter processors; never overwrites panel edits
 uv run python -m core.auth create "local" --role admin   # prints a key, once
 uv run python -m core.users create you@example.com --role admin   # a panel login
 uv run uvicorn api.main:app --reload

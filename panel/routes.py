@@ -37,7 +37,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from api.routes.auth import set_session_cookie
 from api.routes.documents import check_upload
 from api.routes.processors import get_extractor, get_ocr_engine
-from core import users
+from core import repository, users
 from core.auth import SESSION_COOKIE, Principal, Role, require_principal, require_role
 from core.db import get_session
 from doctypes import authoring
@@ -50,6 +50,7 @@ templates = Jinja2Templates(directory=HERE / "templates")
 router = APIRouter(prefix="/panel", include_in_schema=False)
 
 _AUTHOR = require_role(Role.AUTHOR)
+_ADMIN = require_role(Role.ADMIN)
 
 #: What a new processor starts as: the smallest definition that validates,
 #: with a comment-free shape an author can grow.
@@ -88,6 +89,7 @@ def _page(
         template,
         {
             "principal": principal,
+            "is_admin": principal is not None and principal.may(Role.ADMIN),
             "csrf_token": signed_in.csrf_token if signed_in is not None else None,
             **context,
         },
@@ -357,6 +359,70 @@ def run_trial(
         result.scores.items(), key=lambda kv: (kv[1]["hits"], kv[1]["score"]), reverse=True
     )
     return _fragment(request, "_trial.html", trial=result, fields=fields, ranked=ranked)
+
+
+# --- Publishing and retiring --------------------------------------------------
+# Admin only: publishing puts a transform's code live, and retiring takes a
+# processor away from live traffic. Each has a confirmation page that shows
+# exactly what will happen, then a confirm button that goes through HTMX.
+
+
+@router.get("/processors/{name}/versions/{version}/publish", response_class=HTMLResponse)
+def publish_page(
+    name: str,
+    version: int,
+    request: Request,
+    session: Session = Depends(get_session),
+    principal: Principal = Depends(_ADMIN),
+):
+    preview = authoring.publish_preview(session, name, version)
+    return _page(
+        request, "publish.html", principal,
+        preview=preview, lines=[(_kind(line), line) for line in preview.diff],
+    )
+
+
+@router.post("/processors/{name}/versions/{version}/publish")
+def publish(
+    name: str,
+    version: int,
+    session: Session = Depends(get_session),
+    principal: Principal = Depends(_ADMIN),
+):
+    """Every check runs again here: the page may be minutes old."""
+    authoring.publish(session, name, version, published_by=principal.label)
+    return _go(f"/panel/processors/{name}/versions/{version}")
+
+
+@router.get("/processors/{name}/retire", response_class=HTMLResponse)
+def retire_page(
+    name: str,
+    request: Request,
+    session: Session = Depends(get_session),
+    principal: Principal = Depends(_ADMIN),
+):
+    from sqlalchemy import func, select
+
+    from core.models import Extraction
+
+    authoring.history(session, name)  # 404 for an unknown processor
+    live = repository.get_active_document_type(session, name)
+    extracted = session.scalar(
+        select(func.count(Extraction.id)).where(
+            Extraction.doc_type == name, Extraction.is_trial.is_(False)
+        )
+    )
+    return _page(request, "retire.html", principal, name=name, live=live, extracted=extracted)
+
+
+@router.post("/processors/{name}/retire")
+def retire(
+    name: str,
+    session: Session = Depends(get_session),
+    principal: Principal = Depends(_ADMIN),
+):
+    authoring.retire(session, name, retired_by=principal.label)
+    return _go(f"/panel/processors/{name}")
 
 
 def _go(url: str) -> Response:

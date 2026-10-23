@@ -2,7 +2,9 @@
 {% block title %}{{ name }}{% endblock %}
 {% block content %}
 <p class="crumbs"><a href="/panel">Processors</a> / {{ name }}</p>
-<h1>{{ name }}</h1>
+<h1>{{ name }}
+  {% if is_admin and versions|selectattr("is_active")|list %}<a class="button secondary" href="/panel/processors/{{ name }}/retire">Retire…</a>{% endif %}
+</h1>
 <p class="muted">Every version ever written. Published versions never change; a draft is edited in place until it is published.</p>
 <table>
   <thead>

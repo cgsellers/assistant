@@ -10,7 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from api.main import app
-from core import auth, users
+from core import auth, repository, users
 from doctypes import authoring, registry, seed
 
 pytestmark = pytest.mark.usefixtures("fast_hashing")
@@ -337,3 +337,128 @@ class TestTrying:
         )
         assert response.status_code == 422
         assert "stored document or some text" in response.text
+
+
+# --- Publishing and retiring (1.5) --------------------------------------------
+
+
+def _edited_draft(signed_in, htmx, session_factory, **changes) -> int:
+    """A draft of invoice from v1 with `changes` applied; returns its version."""
+    url = _draft(signed_in, htmx)
+    version = int(url.split("/versions/")[1].split("/")[0])
+    with session_factory() as s:
+        row = authoring.get_version(s, "invoice", version)
+        authoring.update_draft(s, "invoice", version, {**row.definition, **changes})
+    return version
+
+
+class TestPublishing:
+    def test_the_preview_shows_the_diff_against_the_live_version(
+        self, signed_in, htmx, session_factory
+    ):
+        version = _edited_draft(signed_in, htmx, session_factory, display_name="Edited")
+        page = signed_in.get(f"/panel/processors/invoice/versions/{version}/publish").text
+
+        assert "instead of v1" in page
+        assert '<span class="add">+display_name: Edited</span>' in page
+        assert "Nobody has published since" in page
+        assert "passes all 5 of its examples" in page
+        assert "changes the transform" not in page  # same code as v1
+
+    def test_new_code_is_called_out_before_confirming(self, signed_in, htmx, session_factory):
+        with session_factory() as s:
+            transform = dict(authoring.get_version(s, "invoice", 1).definition["transform"])
+        transform["code"] = transform["code"] + "\n# reviewed\n"
+        version = _edited_draft(signed_in, htmx, session_factory, transform=transform)
+
+        page = signed_in.get(f"/panel/processors/invoice/versions/{version}/publish").text
+        assert "new Python will run on the server" in page
+
+    def test_confirming_publishes_and_routes_to_it(self, signed_in, htmx, session_factory):
+        version = _edited_draft(signed_in, htmx, session_factory, display_name="Edited")
+        response = signed_in.post(
+            f"/panel/processors/invoice/versions/{version}/publish", headers=htmx
+        )
+        assert response.headers["HX-Redirect"] == f"/panel/processors/invoice/versions/{version}"
+        with session_factory() as s:
+            assert repository.get_active_document_type(s, "invoice").version == version
+
+    def test_failing_examples_hide_the_publish_button(self, signed_in, htmx, session_factory):
+        with session_factory() as s:
+            transform = dict(authoring.get_version(s, "invoice", 1).definition["transform"])
+        transform["code"] = "def transform(data):\n    return data\n"
+        version = _edited_draft(signed_in, htmx, session_factory, transform=transform)
+
+        page = signed_in.get(f"/panel/processors/invoice/versions/{version}/publish").text
+        assert "fails its examples" in page
+        assert "example 1: total should be &#39;120.00&#39;, got null" in page
+        assert f'hx-post="/panel/processors/invoice/versions/{version}/publish"' not in page
+
+    def test_a_conflict_is_explained_before_anyone_clicks(self, signed_in, htmx, session_factory):
+        mine = _edited_draft(signed_in, htmx, session_factory, display_name="Mine")
+        theirs = _edited_draft(signed_in, htmx, session_factory, display_name="Theirs")
+        signed_in.post(f"/panel/processors/invoice/versions/{theirs}/publish", headers=htmx)
+
+        page = signed_in.get(f"/panel/processors/invoice/versions/{mine}/publish").text
+        assert f"v{theirs} was published after this draft was started" in page
+        assert "Publishing would undo it" in page
+        assert f'hx-post="/panel/processors/invoice/versions/{mine}/publish"' not in page
+
+    def test_a_conflict_on_confirm_comes_back_as_a_409_beside_the_button(
+        self, signed_in, htmx, session_factory
+    ):
+        """The preview can be minutes old; the confirm checks again."""
+        mine = _edited_draft(signed_in, htmx, session_factory, display_name="Mine")
+        theirs = _edited_draft(signed_in, htmx, session_factory, display_name="Theirs")
+        signed_in.post(f"/panel/processors/invoice/versions/{theirs}/publish", headers=htmx)
+
+        response = signed_in.post(
+            f"/panel/processors/invoice/versions/{mine}/publish", headers=htmx
+        )
+        assert response.status_code == 409
+        assert "merge its changes" in response.text
+
+    def test_an_author_cannot_publish(self, _wired, session_factory):
+        with session_factory() as s:
+            users.create(s, "bo@example.com", PASSWORD, role="author")
+            base = authoring.get_version(s, "invoice", 1).definition
+            draft = authoring.create_draft(s, base, based_on=1, created_by="bo")
+        with TestClient(app, base_url="https://testserver") as bo:
+            bo.post("/panel/login", data={"email": "bo@example.com", "password": PASSWORD})
+            page = bo.get(f"/panel/processors/invoice/versions/{draft.version}").text
+            assert "An admin publishes drafts" in page
+            response = bo.get(f"/panel/processors/invoice/versions/{draft.version}/publish")
+            assert response.status_code == 403
+            assert "needs the admin role" in response.text
+
+
+class TestRetiring:
+    def test_the_confirmation_says_what_stays(self, signed_in):
+        page = signed_in.get("/panel/processors/invoice/retire").text
+        assert "Nothing is deleted" in page
+        assert "start a draft from v1" in page
+
+    def test_retiring_stops_routing(self, signed_in, htmx, session_factory):
+        response = signed_in.post("/panel/processors/invoice/retire", headers=htmx)
+        assert response.headers["HX-Redirect"] == "/panel/processors/invoice"
+        with session_factory() as s:
+            assert repository.get_active_document_type(s, "invoice") is None
+            assert len(authoring.history(s, "invoice")) == 1
+
+    def test_a_retired_processor_comes_back_by_publishing(self, signed_in, htmx, session_factory):
+        signed_in.post("/panel/processors/invoice/retire", headers=htmx)
+        version = _edited_draft(signed_in, htmx, session_factory)
+        page = signed_in.get(f"/panel/processors/invoice/versions/{version}/publish").text
+        assert "publishing brings invoice back" in page
+        signed_in.post(f"/panel/processors/invoice/versions/{version}/publish", headers=htmx)
+        with session_factory() as s:
+            assert repository.get_active_document_type(s, "invoice").version == version
+
+    def test_history_offers_retire_only_to_admins_and_only_when_live(
+        self, signed_in, htmx
+    ):
+        assert "/panel/processors/invoice/retire" in signed_in.get("/panel/processors/invoice").text
+        signed_in.post("/panel/processors/invoice/retire", headers=htmx)
+        assert "/panel/processors/invoice/retire" not in signed_in.get(
+            "/panel/processors/invoice"
+        ).text

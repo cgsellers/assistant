@@ -11,6 +11,11 @@ A module makes it code again, and baking a definition into a migration freezes
 one version into a file that must never change while the table it seeded goes
 on being edited.
 
+Since the panel, seeds only *create*: they are the starter set for a fresh
+database -- a laptop, CI, the tests -- and never touch a processor that
+already exists. An existing one changes in the panel. So `doctypes/seeds/`
+is not production's copy, and is expected to fall behind it.
+
 Run it with:  uv run python -m doctypes.seed
 """
 
@@ -22,9 +27,11 @@ from pathlib import Path
 
 import yaml
 from pydantic import ValidationError
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from core import repository
+from core.models import DocumentTypeDefinition
 from doctypes import transform
 from doctypes.definition import Definition
 
@@ -102,71 +109,100 @@ def check_transforms(definitions: list[Definition]) -> None:
 
 def sync(session: Session, definitions: list[Definition]) -> dict[str, str]:
     """
-    Make the table match the seed files. Returns name -> what happened.
+    Create the processors that do not exist yet. Returns name -> what happened.
+
+    Create-only, never update. The panel is where an existing processor
+    changes (DESIGN §9.1), so a seed that differs from what is stored is
+    reported and left alone: overwriting it on deploy would quietly undo
+    whatever was published in the panel. Nor is a retired processor brought
+    back -- retiring it was a decision.
 
     Idempotent, because this runs on every deploy and on every developer's
-    machine: a seed whose content already matches the active version writes
-    nothing. Without that, re-running would pile up identical versions and
-    make the version number meaningless as a record of real change.
-
-    A changed seed writes a new version rather than editing the active row,
-    for the reason the table is append-only -- extractions reference the
-    version that produced them.
+    machine: when everything exists, it writes nothing.
     """
-    # Decide everything before writing anything, so the examples of every
-    # type about to change can run first: a broken transform must never
-    # become the active version, and nor should the types seeded beside it.
     actions: dict[str, str] = {}
-    pending = []
+    missing = []
     for definition in definitions:
-        active = _changed(session, definition)
-        if active is False:
-            current = repository.get_active_document_type(session, definition.name)
-            actions[definition.name] = f"unchanged (v{current.version})"
+        state = _state(session, definition)
+        if state is None:
+            missing.append(definition)
         else:
-            pending.append((definition, active))
-    check_transforms([d for d, _ in pending])
+            actions[definition.name] = state
 
-    for definition, active in pending:
-        row = repository.create_document_type_version(
-            session,
-            definition,
-            created_by="seed",
-            based_on_version=None if active is None else active.version,
-        )
-        actions[definition.name] = (
-            f"created (v{row.version})" if active is None else f"updated (v{row.version})"
-        )
-
+    # Every new type's examples run before any is written, so a broken
+    # transform never becomes live -- and nor do the types seeded beside it.
+    check_transforms(missing)
+    for definition in missing:
+        row = repository.create_document_type_version(session, definition, created_by="seed")
+        actions[definition.name] = f"created (v{row.version})"
     return actions
 
 
-def _changed(session: Session, definition: Definition):
+def replace(session: Session, definitions: list[Definition], names: list[str]) -> dict[str, str]:
     """
-    False if the active version already matches; otherwise the active row,
-    or None when there is none yet.
+    Publish the seed file as a new live version, over whatever is stored.
+
+    The break-glass, not the workflow. It exists for one case the panel
+    cannot handle: a stored version that no longer validates -- a rule added
+    to the format since it was written, say -- so the registry skips it, the
+    type stops routing, and the panel cannot open it to start a draft. It
+    overwrites on purpose, so it is only ever run by name.
     """
+    by_name = {d.name: d for d in definitions}
+    unknown = sorted(set(names) - set(by_name))
+    if unknown:
+        raise ValueError(f"no seed file for {unknown}")
+    chosen = [by_name[n] for n in names]
+    check_transforms(chosen)
+
+    from doctypes.authoring import latest_published
+
+    actions = {}
+    for definition in chosen:
+        row = repository.create_document_type_version(
+            session,
+            definition,
+            created_by="seed:replace",
+            based_on_version=latest_published(session, definition.name),
+        )
+        actions[definition.name] = f"replaced (now v{row.version})"
+    return actions
+
+
+def _state(session: Session, definition: Definition) -> str | None:
+    """None if the processor does not exist; otherwise why it is left alone."""
+    from doctypes.authoring import latest_published
+
+    if latest_published(session, definition.name) is None:
+        drafts = session.scalar(
+            select(func.count(DocumentTypeDefinition.id)).where(
+                DocumentTypeDefinition.name == definition.name
+            )
+        )
+        # Only drafts exist: somebody is creating this type in the panel.
+        return f"drafted in the panel ({drafts}), left alone" if drafts else None
+
     active = repository.get_active_document_type(session, definition.name)
     if active is None:
-        return None
-    # Compare at the stored version number: the seed file does not carry one
-    # worth trusting, and a version bump alone is not a content change.
+        return "retired, left alone"
+
     # Both sides through the same model, so a field added to the definition
-    # *format* -- with a default -- does not read as a change to every stored
-    # type. Comparing raw JSON did exactly that: adding `canonical.tax_lines`
-    # versioned the receipt type, which had not changed at all.
+    # *format* -- with a default -- does not read as a difference in every
+    # stored type. Comparing raw JSON did exactly that: adding
+    # `canonical.tax_lines` made the receipt type look changed.
     try:
         stored = Definition.model_validate(active.definition)
     except ValidationError:
-        # The stored version breaks a rule added since it was written -- e.g.
-        # the cap on nullable fields. The registry already skips it, so the
-        # type is not routing at all until a valid version lands; treating it
-        # as changed is what gets one written.
-        return active
+        return (
+            f"v{active.version} no longer validates, so it is not routing; "
+            f"fix with: python -m doctypes.seed --replace {definition.name}"
+        )
     same = definition.model_copy(update={"version": active.version}) == stored.model_copy(
         update={"version": active.version}
     )
-    return False if same else active
+    if same:
+        return f"unchanged (v{active.version})"
+    return f"v{active.version} differs from the seed file, left alone (edit it in the panel)"
 
 
 def main() -> None:
@@ -176,6 +212,10 @@ def main() -> None:
     )
     parser.add_argument(
         "--dry-run", action="store_true", help="parse and report, write nothing"
+    )
+    parser.add_argument(
+        "--replace", action="append", default=[], metavar="NAME",
+        help="publish this seed over what is stored -- the break-glass, see replace()",
     )
     args = parser.parse_args()
 
@@ -198,7 +238,11 @@ def main() -> None:
     from core.db import SessionLocal
 
     with SessionLocal() as session:
-        for name, action in sync(session, definitions).items():
+        actions = (
+            replace(session, definitions, args.replace) if args.replace
+            else sync(session, definitions)
+        )
+        for name, action in actions.items():
             log.info("%-12s %s", name, action)
 
 

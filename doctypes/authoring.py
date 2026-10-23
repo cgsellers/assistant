@@ -268,7 +268,7 @@ def create_draft(
     base to check against at publish time.
     """
     definition = parse(spec)
-    latest = _latest_published(session, definition.name)
+    latest = latest_published(session, definition.name)
 
     if based_on is None and latest is not None:
         raise Conflict(
@@ -343,7 +343,7 @@ def publish(
         .where(DocumentTypeDefinition.name == name)
         .with_for_update()
     ).all()
-    latest = _latest_published(session, name)
+    latest = latest_published(session, name)
     if latest != row.based_on_version:
         started = f"v{row.based_on_version}" if row.based_on_version else "nothing"
         raise Conflict(
@@ -383,12 +383,73 @@ def retire(session: Session, name: str, *, retired_by: str) -> DocumentTypeDefin
     return active
 
 
-def _latest_published(session: Session, name: str) -> int | None:
+def latest_published(session: Session, name: str) -> int | None:
+    """The newest published version, live or retired. What a draft must be based on."""
     return session.scalar(
         select(func.max(DocumentTypeDefinition.version)).where(
             DocumentTypeDefinition.name == name,
             DocumentTypeDefinition.is_published.is_(True),
         )
+    )
+
+
+@dataclass(frozen=True)
+class PublishPreview:
+    """Everything a person should see before putting a draft live."""
+
+    row: DocumentTypeDefinition
+    #: What it replaces: the live version, else the newest published one (a
+    #: retired type coming back). None for a brand-new processor.
+    against: DocumentTypeDefinition | None
+    diff: list[str]
+    #: The transform's code differs from what it replaces -- new code will run
+    #: on the server. The one change worth a second look before confirming.
+    code_changed: bool
+    example_failures: list[str]
+    #: Set when someone published after this draft was started: publishing
+    #: would be refused, so the preview says so up front.
+    conflict_with: int | None
+
+    @property
+    def can_publish(self) -> bool:
+        return self.conflict_with is None and not self.example_failures
+
+
+def publish_preview(session: Session, name: str, version: int) -> PublishPreview:
+    """
+    What `publish` would do, checked the same way, without doing it.
+
+    Runs the transform's examples, so it costs an interpreter per example --
+    the same price publishing pays, paid while a person can still read the
+    failures.
+    """
+    row = get_version(session, name, version)
+    if row.is_published:
+        raise AuthoringError(f"{name} v{version} is already published")
+    definition = parse(row.definition)
+
+    active = repository.get_active_document_type(session, name)
+    latest = latest_published(session, name)
+    against = active or (get_version(session, name, latest) if latest else None)
+
+    if against is not None:
+        label = f"v{against.version}" + (" (live)" if against.is_active else "")
+        lines = diff(
+            against.definition, row.definition,
+            older_label=label, newer_label=f"v{version} (this draft)",
+        )
+        old_code = (against.definition.get("transform") or {}).get("code")
+    else:
+        lines, old_code = [], None
+    new_code = definition.transform.code if definition.transform else None
+
+    return PublishPreview(
+        row=row,
+        against=against,
+        diff=lines,
+        code_changed=old_code != new_code,
+        example_failures=check_examples(definition),
+        conflict_with=latest if latest != row.based_on_version else None,
     )
 
 

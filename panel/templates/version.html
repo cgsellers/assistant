@@ -17,6 +17,11 @@
   <button hx-post="/panel/processors/{{ row.name }}/versions/{{ row.version }}/draft" hx-target="#problems">Start a draft from v{{ row.version }}</button>
   {% else %}
   <a class="button" href="/panel/processors/{{ row.name }}/versions/{{ row.version }}/edit">Edit this draft</a>
+  {% if is_admin %}
+  <a class="button" href="/panel/processors/{{ row.name }}/versions/{{ row.version }}/publish">Publish…</a>
+  {% else %}
+  <span class="muted">An admin publishes drafts.</span>
+  {% endif %}
   {% endif %}
   <a class="button secondary" href="/panel/processors/{{ row.name }}/versions/{{ row.version }}/try">Try it on a document</a>
   {% if compare_with %}

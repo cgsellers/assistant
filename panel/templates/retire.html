@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Retire {{ name }}{% endblock %}
+{% block content %}
+<p class="crumbs"><a href="/panel">Processors</a> / <a href="/panel/processors/{{ name }}">{{ name }}</a> / retire</p>
+<h1>Retire {{ name }}?</h1>
+{% if live %}
+<ul class="checks">
+  <li class="warn">⚠ New documents will stop routing to {{ name }}. Ones that only match it will be marked unsupported until another processor matches them.</li>
+  <li class="good">✓ Nothing is deleted: every version, and the {{ extracted }} extraction{{ "" if extracted == 1 else "s" }} made with {{ name }}, stay as they are.</li>
+  <li class="good">✓ It can come back: start a draft from v{{ live.version }} and publish it.</li>
+</ul>
+<div class="actions">
+  <button class="danger" hx-post="/panel/processors/{{ name }}/retire" hx-target="#problems" hx-disabled-elt="this">Retire {{ name }}</button>
+  <a href="/panel/processors/{{ name }}">Cancel</a>
+</div>
+<div id="problems"></div>
+{% else %}
+<p>{{ name }} isn't live, so there is nothing to retire. <a href="/panel/processors/{{ name }}">Back</a></p>
+{% endif %}
+{% endblock %}
