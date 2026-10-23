@@ -5,8 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Processors{% endblock %} · Ledgerline</title>
   <link rel="stylesheet" href="/panel/static/panel.css">
-  {# HTMX's inline indicator styles would need style-src 'unsafe-inline'. #}
-  <meta name="htmx-config" content='{"includeIndicatorStyles": false, "allowEval": false}'>
+  {# HTMX's inline indicator styles would need style-src 'unsafe-inline'.
+     403, 409 and 422 carry the problems to show beside the form, so they are
+     swapped in like a success; other errors are not. #}
+  <meta name="htmx-config" content='{"includeIndicatorStyles": false, "allowEval": false, "responseHandling": [{"code": "204", "swap": false}, {"code": "[23]..", "swap": true}, {"code": "(403|409|422)", "swap": true, "error": false}, {"code": "[45]..", "swap": false, "error": true}]}'>
   <script src="/panel/static/htmx-2.0.4.min.js" defer></script>
 </head>
 {# Every HTMX request from this page carries the session's CSRF token. #}

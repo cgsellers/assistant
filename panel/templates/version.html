@@ -12,8 +12,17 @@
   <dt>Edited from</dt><dd>{% if row.based_on_version %}v{{ row.based_on_version }}{% else %}— (new processor){% endif %}</dd>
   <dt>Created</dt><dd>{{ row.created_at.strftime("%Y-%m-%d %H:%M") }} UTC</dd>
 </dl>
-{% if compare_with %}
-<p><a href="/panel/processors/{{ row.name }}/diff?a={{ compare_with }}&amp;b={{ row.version }}">See what changed from v{{ compare_with }}</a></p>
-{% endif %}
+<div class="actions">
+  {% if row.is_published %}
+  <button hx-post="/panel/processors/{{ row.name }}/versions/{{ row.version }}/draft" hx-target="#problems">Start a draft from v{{ row.version }}</button>
+  {% else %}
+  <a class="button" href="/panel/processors/{{ row.name }}/versions/{{ row.version }}/edit">Edit this draft</a>
+  {% endif %}
+  <a class="button secondary" href="/panel/processors/{{ row.name }}/versions/{{ row.version }}/try">Try it on a document</a>
+  {% if compare_with %}
+  <a href="/panel/processors/{{ row.name }}/diff?a={{ compare_with }}&amp;b={{ row.version }}">See what changed from v{{ compare_with }}</a>
+  {% endif %}
+</div>
+<div id="problems"></div>
 <pre class="code">{{ text }}</pre>
 {% endblock %}

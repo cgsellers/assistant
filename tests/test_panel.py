@@ -166,3 +166,174 @@ def _csrf(page: str) -> str:
     marker = '"X-CSRF-Token": "'
     start = page.index(marker) + len(marker)
     return page[start : page.index('"', start)]
+
+
+# --- Editing and trying (1.4) -------------------------------------------------
+
+
+@pytest.fixture
+def htmx(signed_in):
+    """Headers an HTMX request from a panel page carries."""
+    token = _csrf(signed_in.get("/panel").text)
+    return {auth.CSRF_HEADER: token, "HX-Request": "true"}
+
+
+@pytest.fixture
+def fake_model():
+    from api.routes import processors as api_processors
+
+    from .conftest import FakeExtractor
+
+    extractor = FakeExtractor(
+        {"subtotal": "100.00", "tax_amount": "20.00", "total": None, "vendor": "ACME"}
+    )
+    app.dependency_overrides[api_processors.get_extractor] = lambda: extractor
+    yield extractor
+    app.dependency_overrides.pop(api_processors.get_extractor, None)
+
+
+def _draft(signed_in, htmx) -> str:
+    response = signed_in.post("/panel/processors/invoice/versions/1/draft", headers=htmx)
+    return response.headers["HX-Redirect"]
+
+
+class TestEditing:
+    def test_a_draft_starts_from_a_published_version(self, signed_in, htmx, session_factory):
+        assert _draft(signed_in, htmx) == "/panel/processors/invoice/versions/2/edit"
+        with session_factory() as s:
+            row = authoring.get_version(s, "invoice", 2)
+        assert (row.based_on_version, row.created_by) == (1, "user:ana@example.com")
+
+    def test_the_editor_gives_the_code_its_own_box(self, signed_in, htmx):
+        page = signed_in.get(_draft(signed_in, htmx)).text
+        yaml_box = page.split('name="text"')[1].split("</textarea>")[0]
+        code_box = page.split('name="code"')[1].split("</textarea>")[0]
+        assert "def transform" not in yaml_box
+        assert "examples:" in yaml_box
+        assert "def transform(data):" in code_box
+
+    def test_saving_keeps_yaml_and_code_together(self, signed_in, htmx, session_factory):
+        url = _draft(signed_in, htmx)
+        with session_factory() as s:
+            text, code = authoring.editable(authoring.get_version(s, "invoice", 2).definition)
+
+        response = signed_in.post(
+            url.replace("/edit", "/save"),
+            data={"text": text.replace("display_name: Invoice", "display_name: Edited"),
+                  "code": code},
+            headers=htmx,
+        )
+        assert response.status_code == 200
+        assert "Saved invoice v2" in response.text
+        with session_factory() as s:
+            row = authoring.get_version(s, "invoice", 2)
+        assert row.display_name == "Edited"
+        assert "def transform" in row.definition["transform"]["code"]
+
+    def test_an_uploaded_py_replaces_the_code_box(self, signed_in, htmx, session_factory):
+        url = _draft(signed_in, htmx)
+        with session_factory() as s:
+            text, _ = authoring.editable(authoring.get_version(s, "invoice", 2).definition)
+        uploaded = (
+            "from decimal import Decimal\n\ndef transform(data):\n    return data\n"
+        )
+        # Examples would fail on publish, not here: saving a draft is allowed
+        # to be work in progress.
+        signed_in.post(
+            url.replace("/edit", "/save"),
+            data={"text": text, "code": "ignored"},
+            files={"code_file": ("t.py", uploaded.encode(), "text/x-python")},
+            headers=htmx,
+        )
+        with session_factory() as s:
+            stored = authoring.get_version(s, "invoice", 2).definition
+        assert stored["transform"]["code"] == uploaded
+
+    def test_problems_come_back_beside_the_form_with_their_paths(self, signed_in, htmx):
+        url = _draft(signed_in, htmx)
+        response = signed_in.post(
+            url.replace("/edit", "/save"),
+            data={"text": "name: invoice\nmatches: {keywords: [x]}\nfields: {}", "code": ""},
+            headers=htmx,
+        )
+        assert response.status_code == 422
+        assert "not a valid processor" in response.text
+        assert "<code>fields:" in response.text
+        assert "<html" not in response.text  # a fragment, not a page
+
+    def test_a_published_version_opens_read_only(self, signed_in):
+        response = signed_in.get(
+            "/panel/processors/invoice/versions/1/edit", follow_redirects=False
+        )
+        assert response.headers["location"] == "/panel/processors/invoice/versions/1"
+
+    def test_a_new_processor_becomes_a_draft(self, signed_in, htmx):
+        response = signed_in.post(
+            "/panel/new",
+            data={"text": "name: credit_note\nmatches: {keywords: [credit note]}\n"
+                          "fields: {total: {type: money, description: The total.}}"},
+            headers=htmx,
+        )
+        assert response.headers["HX-Redirect"] == "/panel/processors/credit_note/versions/1/edit"
+
+    def test_the_skeleton_for_a_new_processor_is_itself_valid(self):
+        from panel.routes import NEW_PROCESSOR
+
+        authoring.parse(authoring.join_edit(NEW_PROCESSOR, ""))
+
+    def test_an_author_may_edit_but_this_needs_a_session_token(self, signed_in):
+        assert signed_in.post("/panel/processors/invoice/versions/1/draft").status_code == 403
+
+
+class TestTrying:
+    TEXT = "ACME LTD\nINVOICE INV-1\nDue Date: 1 May 2026\nSubtotal 100.00\nVAT 20.00"
+
+    def test_a_trial_shows_routing_fields_and_what_was_derived(self, signed_in, htmx, fake_model):
+        response = signed_in.post(
+            "/panel/processors/invoice/versions/1/try", data={"text": self.TEXT}, headers=htmx
+        )
+        assert response.status_code == 200
+        page = response.text
+        assert "would route here" in page
+        assert "120.00" in page
+        assert 'title="worked out by the transform' in page
+        assert "not stored" in page
+
+    def test_a_draft_can_be_tried_before_anything_routes_to_it(
+        self, signed_in, htmx, fake_model
+    ):
+        url = _draft(signed_in, htmx)
+        response = signed_in.post(url.replace("/edit", "/try"), data={"text": self.TEXT},
+                                  headers=htmx)
+        assert "would route here" in response.text
+
+    def test_an_uploaded_sample_is_read_like_a_document(self, signed_in, htmx, fake_model):
+        from api.routes import processors as api_processors
+        from ocr.base import OcrOutput
+
+        class _Engine:
+            name = "fake"
+
+            def read(self, data, mime_type):
+                return OcrOutput(full_text=TestTrying.TEXT)
+
+        app.dependency_overrides[api_processors.get_ocr_engine] = _Engine
+        try:
+            from .conftest import TINY_PNG
+
+            response = signed_in.post(
+                "/panel/processors/invoice/versions/1/try",
+                files={"sample": ("s.png", TINY_PNG, "image/png")},
+                headers=htmx,
+            )
+        finally:
+            app.dependency_overrides.pop(api_processors.get_ocr_engine, None)
+        assert response.status_code == 200
+        assert f"{len(self.TEXT)} characters" in response.text
+
+    def test_nothing_to_try_it_on_is_explained(self, signed_in, htmx, fake_model):
+        response = signed_in.post(
+            "/panel/processors/invoice/versions/1/try", data={"text": ""}, headers=htmx
+        )
+        assert response.status_code == 422
+        assert "stored document or some text" in response.text

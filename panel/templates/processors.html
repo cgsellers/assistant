@@ -1,6 +1,8 @@
 {% extends "base.html" %}
 {% block content %}
-<h1>Processors</h1>
+<h1>Processors
+  {% if principal %}<a class="button" href="/panel/new">New processor</a>{% endif %}
+</h1>
 <p class="muted">One per document format. Routing sends each document to the live version of whichever matches it best.</p>
 {% if processors %}
 <table>

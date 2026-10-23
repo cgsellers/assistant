@@ -44,6 +44,10 @@ def settings(tmp_path, monkeypatch) -> Iterator[Settings]:
     """
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'test.db'}")
     monkeypatch.setenv("STORAGE_DIR", str(tmp_path / "files"))
+    # Pinned, because a developer's .env may relax them for local work -- and
+    # the tests are what prove the production values behave.
+    monkeypatch.setenv("REQUIRE_AUTH", "true")
+    monkeypatch.setenv("SESSION_COOKIE_SECURE", "true")
     get_settings.cache_clear()
     yield get_settings()
     get_settings.cache_clear()

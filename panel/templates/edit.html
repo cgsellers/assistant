@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Edit {{ row.name }} v{{ row.version }}{% endblock %}
+{% block content %}
+<p class="crumbs"><a href="/panel">Processors</a> / <a href="/panel/processors/{{ row.name }}">{{ row.name }}</a> / <a href="/panel/processors/{{ row.name }}/versions/{{ row.version }}">v{{ row.version }}</a> / edit</p>
+<h1>Edit {{ row.name }} v{{ row.version }} <span class="badge draft">draft</span></h1>
+<p class="muted">
+  {% if row.based_on_version %}Edited from v{{ row.based_on_version }}. Publishing will refuse if a newer version is published first.{% else %}A new processor.{% endif %}
+  The name can't change: it is what extractions are filed under.
+</p>
+<form hx-post="/panel/processors/{{ row.name }}/versions/{{ row.version }}/save"
+      hx-encoding="multipart/form-data" hx-target="#result" hx-disabled-elt="find button">
+  <div class="editor">
+    <label>Definition (YAML)
+      <textarea name="text" rows="30" spellcheck="false" class="code">{{ text }}</textarea>
+    </label>
+    <label>Transform (Python) <span class="muted">— optional; must define <code>transform(data)</code></span>
+      <textarea name="code" rows="30" spellcheck="false" class="code">{{ code }}</textarea>
+      <span class="file">or upload a .py file instead: <input type="file" name="code_file" accept=".py,text/x-python"></span>
+    </label>
+  </div>
+  <div class="actions">
+    <button type="submit">Save draft</button>
+    <a class="button secondary" href="/panel/processors/{{ row.name }}/versions/{{ row.version }}/try">Try it</a>
+  </div>
+</form>
+<div id="result"></div>
+{% endblock %}

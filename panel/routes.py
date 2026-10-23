@@ -27,7 +27,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, Form, Request, status
+from fastapi import APIRouter, Depends, File, Form, Request, UploadFile, status
 from fastapi.exception_handlers import http_exception_handler
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
@@ -35,8 +35,10 @@ from sqlalchemy.orm import Session
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from api.routes.auth import set_session_cookie
+from api.routes.documents import check_upload
+from api.routes.processors import get_extractor, get_ocr_engine
 from core import users
-from core.auth import SESSION_COOKIE, Principal, require_principal
+from core.auth import SESSION_COOKIE, Principal, Role, require_principal, require_role
 from core.db import get_session
 from doctypes import authoring
 from doctypes.authoring import AuthoringError, Conflict, NotFound
@@ -46,6 +48,26 @@ STATIC_DIR = HERE / "static"
 templates = Jinja2Templates(directory=HERE / "templates")
 
 router = APIRouter(prefix="/panel", include_in_schema=False)
+
+_AUTHOR = require_role(Role.AUTHOR)
+
+#: What a new processor starts as: the smallest definition that validates,
+#: with a comment-free shape an author can grow.
+NEW_PROCESSOR = """\
+name: new_type
+display_name: New document type
+description: What this document is, in a sentence.
+matches:
+  keywords: [first keyword, second keyword]
+  min_score: 0.2
+fields:
+  total:
+    type: money
+    description: The amount to pay, labelled Total. Null if it is not printed.
+rules:
+- type: required
+  field: total
+"""
 
 #: Applied to every /panel response. `style-src 'self'` holds because the CSS
 #: is a file and HTMX's own inline indicator styles are switched off in the
@@ -202,6 +224,150 @@ def _kind(line: str) -> str:
     return {"+": "add", "-": "del"}.get(line[:1], "same")
 
 
+# --- Drafting and editing ----------------------------------------------------
+# Changes go through HTMX (hx-post), so the app-wide check has seen the CSRF
+# token before any of these run. Results come back as fragments swapped into
+# the page; a failure is a 4xx with the problems listed, which the page's
+# htmx-config tells HTMX to show rather than drop.
+
+
+@router.get("/new", response_class=HTMLResponse)
+def new_page(request: Request, principal: Principal = Depends(_AUTHOR)):
+    return _page(request, "new.html", principal, text=NEW_PROCESSOR)
+
+
+@router.post("/new")
+def create_new(
+    request: Request,
+    text: str = Form(""),
+    session: Session = Depends(get_session),
+    principal: Principal = Depends(_AUTHOR),
+):
+    spec = authoring.join_edit(text, "")
+    row = authoring.create_draft(session, spec, based_on=None, created_by=principal.label)
+    return _go(f"/panel/processors/{row.name}/versions/{row.version}/edit")
+
+
+@router.post("/processors/{name}/versions/{version}/draft")
+def draft_from(
+    name: str,
+    version: int,
+    session: Session = Depends(get_session),
+    principal: Principal = Depends(_AUTHOR),
+):
+    """A new draft starting from a published version -- how every edit begins."""
+    base = authoring.get_version(session, name, version)
+    row = authoring.create_draft(
+        session, base.definition, based_on=version, created_by=principal.label
+    )
+    return _go(f"/panel/processors/{name}/versions/{row.version}/edit")
+
+
+@router.get("/processors/{name}/versions/{version}/edit", response_class=HTMLResponse)
+def edit_page(
+    name: str,
+    version: int,
+    request: Request,
+    session: Session = Depends(get_session),
+    principal: Principal = Depends(_AUTHOR),
+):
+    row = authoring.get_version(session, name, version)
+    if row.is_published:
+        # Published versions never change. Send the author to the version,
+        # where "start a draft from this" is the way to edit it.
+        return RedirectResponse(
+            f"/panel/processors/{name}/versions/{version}", status.HTTP_303_SEE_OTHER
+        )
+    text, code = authoring.editable(row.definition)
+    return _page(request, "edit.html", principal, row=row, text=text, code=code)
+
+
+@router.post("/processors/{name}/versions/{version}/save", response_class=HTMLResponse)
+def save(
+    name: str,
+    version: int,
+    request: Request,
+    text: str = Form(""),
+    code: str = Form(""),
+    code_file: UploadFile | None = File(None),
+    session: Session = Depends(get_session),
+    principal: Principal = Depends(_AUTHOR),
+):
+    """
+    Saves over the draft. An uploaded .py replaces whatever is in the code
+    box -- the "attach a file" way of writing a transform.
+    """
+    uploaded = code_file.file.read() if code_file is not None else b""
+    if uploaded:
+        try:
+            code = uploaded.decode("utf-8")
+        except UnicodeDecodeError:
+            raise AuthoringError("the uploaded file is not UTF-8 text") from None
+    row = authoring.update_draft(session, name, version, authoring.join_edit(text, code))
+    return _fragment(request, "_saved.html", row=row, from_file=bool(uploaded))
+
+
+# --- Trying a version ---------------------------------------------------------
+
+
+@router.get("/processors/{name}/versions/{version}/try", response_class=HTMLResponse)
+def try_page(
+    name: str,
+    version: int,
+    request: Request,
+    session: Session = Depends(get_session),
+    principal: Principal = Depends(_AUTHOR),
+):
+    row = authoring.get_version(session, name, version)
+    return _page(request, "try.html", principal, row=row)
+
+
+@router.post("/processors/{name}/versions/{version}/try", response_class=HTMLResponse)
+def run_trial(
+    name: str,
+    version: int,
+    request: Request,
+    text: str = Form(""),
+    document_id: str = Form(""),
+    sample: UploadFile | None = File(None),
+    session: Session = Depends(get_session),
+    extractor=Depends(get_extractor),
+    engine=Depends(get_ocr_engine),
+    principal: Principal = Depends(_AUTHOR),
+):
+    """
+    One of: an uploaded sample (read like a real document, not ingested), a
+    stored document (recorded as a trial), or pasted text. In that order.
+    """
+    data = sample.file.read() if sample is not None else b""
+    if data:
+        text = authoring.text_from_file(data, check_upload(data), engine)
+        result = authoring.trial_run(session, name, version, extractor=extractor, text=text)
+    elif document_id.strip():
+        result = authoring.trial_run(
+            session, name, version, extractor=extractor, document_id=document_id.strip()
+        )
+    else:
+        result = authoring.trial_run(session, name, version, extractor=extractor, text=text)
+
+    row = authoring.get_version(session, name, version)
+    fields = list(authoring.parse(row.definition).fields)
+    # Ranked the way routing ranks: signals hit, then share of the type's own.
+    ranked = sorted(
+        result.scores.items(), key=lambda kv: (kv[1]["hits"], kv[1]["score"]), reverse=True
+    )
+    return _fragment(request, "_trial.html", trial=result, fields=fields, ranked=ranked)
+
+
+def _go(url: str) -> Response:
+    """Navigate the browser after an HTMX request."""
+    return Response(headers={"HX-Redirect": url})
+
+
+def _fragment(request: Request, template: str, *, status_code: int = 200, **context):
+    return templates.TemplateResponse(request, template, context, status_code=status_code)
+
+
 # --- Wiring, done by api.main -------------------------------------------------
 
 
@@ -212,12 +378,16 @@ async def unauthenticated(request: Request, exc: StarletteHTTPException):
     path keeps the API's ordinary error.
     """
     path = request.url.path
-    if exc.status_code == 401 and path.startswith("/panel"):
+    if not path.startswith("/panel"):
+        return await http_exception_handler(request, exc)
+    if exc.status_code == 401:
         if request.headers.get("hx-request"):
             return Response(headers={"HX-Redirect": "/panel/login"})
         return RedirectResponse("/panel/login", status.HTTP_303_SEE_OTHER)
-    if exc.status_code == 404 and path.startswith("/panel"):
+    if exc.status_code == 404:
         return _page(request, "missing.html", None, detail=exc.detail, status_code=404)
+    if exc.status_code == 403:
+        return _problem(request, str(exc.detail), [], 403)
     return await http_exception_handler(request, exc)
 
 
@@ -228,10 +398,18 @@ def authoring_page(request: Request, exc: AuthoringError) -> HTMLResponse:
     a second handler keyed on NotFound would have caught the API's too.
     """
     code = 404 if isinstance(exc, NotFound) else 409 if isinstance(exc, Conflict) else 422
-    return _page(
-        request, "missing.html" if code == 404 else "problem.html", None,
-        detail=str(exc), problems=exc.details, status_code=code,
-    )
+    if code == 404 and not request.headers.get("hx-request"):
+        return _page(request, "missing.html", None, detail=str(exc), status_code=404)
+    return _problem(request, str(exc), exc.details, code)
+
+
+def _problem(request: Request, detail: str, problems: list[str], code: int):
+    """A fragment for HTMX to swap in beside the form, or a page otherwise."""
+    if request.headers.get("hx-request"):
+        return _fragment(
+            request, "_problems.html", detail=detail, problems=problems, status_code=code
+        )
+    return _page(request, "problem.html", None, detail=detail, problems=problems, status_code=code)
 
 
 async def security_headers(request: Request, call_next):

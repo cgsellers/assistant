@@ -406,8 +406,13 @@ uv run python -m doctypes.seed     # loads the shipped document types
 uv run python -m core.auth create "local" --role admin   # prints a key, once
 uv run python -m core.users create you@example.com --role admin   # a panel login
 uv run uvicorn api.main:app --reload
-# docs at http://127.0.0.1:8000/docs, health check at /health
+# docs at http://127.0.0.1:8000/docs, the panel at /panel, health check at /health
 ```
+
+The panel's session cookie is `Secure`, so it is only sent over https. Chrome and Firefox
+make an exception for `localhost`; Safari may not, which looks like signing in and landing
+back on the form. For plain-http local work, add `SESSION_COOKIE_SECURE=false` to `.env`
+and restart. Never in a deployment.
 
 Lint and tests:
 

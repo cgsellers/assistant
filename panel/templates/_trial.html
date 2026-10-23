@@ -1,0 +1,49 @@
+<section class="trial">
+  <h2>Routing</h2>
+  <p>
+    {% if trial.routed_to == trial.name %}<span class="badge active">would route here</span>
+    {% elif trial.routed_to %}<span class="badge retired">would route to {{ trial.routed_to }}</span>
+    {% else %}<span class="badge retired">would match nothing</span>{% endif %}
+    <span class="muted">{{ trial.chars }} characters of text{% if trial.profile %} · issuer profile {{ trial.profile }}{% endif %}</span>
+  </p>
+  <table class="compact">
+    <thead><tr><th>Processor</th><th>Signals hit</th><th>Share</th></tr></thead>
+    <tbody>
+      {% for name, s in ranked %}
+      <tr{% if name == trial.routed_to %} class="winner"{% endif %}><td>{{ name }}</td><td>{{ s.hits }}</td><td>{{ "%.2f"|format(s.score) }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <h2>Rules</h2>
+  {% if trial.errors %}
+  <ul class="problems">{% for e in trial.errors %}<li><code>{{ e }}</code></li>{% endfor %}</ul>
+  {% else %}
+  <p class="ok">Every rule passes.</p>
+  {% endif %}
+
+  <h2>Fields</h2>
+  <table class="compact">
+    <thead><tr><th>Field</th><th>Value</th><th></th></tr></thead>
+    <tbody>
+      {% for field in fields %}
+      {% set value = trial.data.get(field) %}
+      <tr>
+        <td><code>{{ field }}</code></td>
+        <td>{% if value is none %}<span class="muted">null</span>
+            {% elif value is mapping or (value is iterable and value is not string) %}<pre class="inline">{{ value|tojson(indent=2) }}</pre>
+            {% else %}{{ value }}{% endif %}</td>
+        <td>{% if field in trial.derived %}<span class="badge draft" title="worked out by the transform, not read off the page">derived</span>{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <details>
+    <summary>What the model returned, before the transform</summary>
+    <pre class="code">{{ trial.raw|tojson(indent=2) }}</pre>
+  </details>
+
+  <p class="muted">{{ trial.model }} · ${{ trial.cost_usd }} · {{ trial.input_tokens }} in / {{ trial.output_tokens }} out · {{ trial.latency_ms }} ms
+    {% if trial.extraction_id %} · recorded as trial {{ trial.extraction_id[:8] }}{% else %} · not stored{% endif %}</p>
+</section>

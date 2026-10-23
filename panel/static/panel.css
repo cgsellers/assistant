@@ -69,3 +69,36 @@ button.link { background: none; border: none; color: var(--accent); padding: 0; 
 
 .error { color: var(--bad); }
 ul.problems { padding-left: 1.2rem; }
+
+/* Editing and trying */
+.button, a.button { display: inline-block; padding: 0.5rem 1rem; border-radius: 6px;
+  border: 1px solid var(--accent); background: var(--accent); color: #fff; font-size: 0.95rem; }
+a.button:hover { text-decoration: none; filter: brightness(1.08); }
+.button.secondary, a.button.secondary { background: #fff; color: var(--accent); }
+h1 .button { margin-left: auto; font-size: 0.85rem; font-weight: 500; }
+.actions { display: flex; align-items: center; gap: 0.75rem; margin: 1rem 0; flex-wrap: wrap; }
+button[disabled] { opacity: 0.6; cursor: progress; }
+
+textarea.code { display: block; width: 100%; box-sizing: border-box; margin-top: 0.3rem;
+  padding: 0.75rem; border: 1px solid var(--line); border-radius: 6px; background: var(--wash);
+  font: 13px/1.45 ui-monospace, Menlo, monospace; tab-size: 4; resize: vertical; }
+.editor { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+@media (max-width: 900px) { .editor { grid-template-columns: 1fr; } }
+.editor .file { display: block; font-weight: 400; margin-top: 0.4rem; color: var(--muted); }
+.editor .file input { display: inline; width: auto; border: none; padding: 0; }
+
+.ok { color: var(--good); }
+.problem { border: 1px solid var(--bad); border-radius: 6px; padding: 0.5rem 1rem; margin: 1rem 0;
+  background: #fffafa; }
+
+.trial { margin-top: 1.5rem; border-top: 1px solid var(--line); }
+.trial h2 { font-size: 1.05rem; margin: 1.25rem 0 0.4rem; }
+table.compact { margin-top: 0.25rem; }
+table.compact td, table.compact th { padding: 0.3rem 0.6rem; }
+tr.winner td { font-weight: 600; }
+pre.inline { margin: 0; font: 12px/1.4 ui-monospace, Menlo, monospace; white-space: pre-wrap; }
+details { margin: 1rem 0; }
+summary { cursor: pointer; color: var(--accent); }
+
+.htmx-indicator { display: none; }
+.htmx-request .htmx-indicator, .htmx-request.htmx-indicator { display: inline; }

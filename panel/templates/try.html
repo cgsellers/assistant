@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Try {{ row.name }} v{{ row.version }}{% endblock %}
+{% block content %}
+<p class="crumbs"><a href="/panel">Processors</a> / <a href="/panel/processors/{{ row.name }}">{{ row.name }}</a> / <a href="/panel/processors/{{ row.name }}/versions/{{ row.version }}">v{{ row.version }}</a> / try</p>
+<h1>Try {{ row.name }} v{{ row.version }}
+  {% if row.is_active %}<span class="badge active">live</span>{% elif row.is_published %}<span class="badge published">published</span>{% else %}<span class="badge draft">draft</span>{% endif %}
+</h1>
+<p class="muted">One real model call, billed like any extraction. Nothing here becomes a document's result or reaches the ledger.
+  {% if not row.is_published %}<a href="/panel/processors/{{ row.name }}/versions/{{ row.version }}/edit">Back to editing</a>{% endif %}</p>
+<form hx-post="/panel/processors/{{ row.name }}/versions/{{ row.version }}/try"
+      hx-encoding="multipart/form-data" hx-target="#trial" hx-disabled-elt="find button">
+  <label>A sample file <span class="muted">— read like a real upload (text layer, else OCR), not stored</span>
+    <input type="file" name="sample" accept="image/*,application/pdf">
+  </label>
+  <label>…or a stored document's id <span class="muted">— recorded as a trial, so its cost shows in the cost report</span>
+    <input type="text" name="document_id" autocomplete="off">
+  </label>
+  <label>…or paste the document's text
+    <textarea name="text" rows="10" spellcheck="false" class="code"></textarea>
+  </label>
+  <button type="submit">Run it <span class="htmx-indicator">· running…</span></button>
+</form>
+<div id="trial"></div>
+{% endblock %}

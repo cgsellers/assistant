@@ -1650,6 +1650,24 @@ out as a `|` block, so it reads and diffs as code. The browser-specific parts:
   prove it. The CSP is the second layer: injected script would not run even if
   escaping failed.
 
+Then editing and trial runs. A published version offers "start a draft from vN"; a draft
+opens in an editor with **two boxes, the YAML and the transform's Python**, because
+Python inside a YAML block breaks on one wrong indent. They are joined back into one
+definition on save, and a `.py` upload can replace the code box. Saving never runs the
+examples: a draft may be work in progress, and the examples gate publishing instead.
+A failed save comes back as a 422 fragment listing every problem with its path, and the
+page's HTMX config swaps 403, 409 and 422 in beside the form instead of dropping them.
+
+The trial page takes a sample file, a stored document's id or pasted text, and shows:
+- the routing table, ranked the way routing ranks;
+- every field, with the derived ones marked;
+- the rule errors;
+- the model's raw answer, before the transform;
+- cost and latency.
+
+**Not done yet:** the boxes are plain text areas, so Tab moves focus instead of
+indenting. A code editor (CodeMirror) is the obvious next layer, vendored like HTMX.
+
 ### 9.2 Why Postgres
 
 SQLite was right for getting started: nothing to run, and a suite of almost 800 tests in

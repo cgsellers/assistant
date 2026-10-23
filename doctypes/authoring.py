@@ -177,6 +177,43 @@ def to_yaml(stored: dict | Definition) -> str:
             {"type": rule.type, **dumped}
             for rule, dumped in zip(definition.rules, data["rules"], strict=True)
         ]
+    return _dump(data)
+
+
+def editable(stored: dict | Definition) -> tuple[str, str]:
+    """
+    A version split for the editor: the YAML without the transform's code,
+    and the code on its own. Python inside a YAML block is miserable to edit
+    -- one wrong indent and it is a different string -- so the panel gives
+    each its own box and `join_edit` puts them back together.
+    """
+    data = yaml.safe_load(to_yaml(stored))
+    code = ""
+    if isinstance(data.get("transform"), dict):
+        code = data["transform"].pop("code", "")
+    return _dump(data), code
+
+
+def join_edit(text: str, code: str) -> dict:
+    """The editor's two boxes back into one definition, or AuthoringError."""
+    try:
+        spec = yaml.safe_load(text or "")
+    except yaml.YAMLError as exc:
+        raise AuthoringError("the YAML does not parse", [str(exc)]) from None
+    if not isinstance(spec, dict):
+        raise AuthoringError("the YAML must be a mapping, like a seed file")
+    code = (code or "").replace("\r\n", "\n")
+    transform = spec.get("transform")
+    if code.strip():
+        spec["transform"] = {**(transform if isinstance(transform, dict) else {}), "code": code}
+    elif isinstance(transform, dict) and "code" not in transform:
+        if transform.get("examples"):
+            raise AuthoringError("the transform has examples but no code")
+        spec.pop("transform")
+    return spec
+
+
+def _dump(data: dict) -> str:
     return yaml.dump(data, Dumper=_SeedDumper, sort_keys=False, allow_unicode=True, width=88)
 
 

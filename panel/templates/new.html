@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}New processor{% endblock %}
+{% block content %}
+<p class="crumbs"><a href="/panel">Processors</a> / new</p>
+<h1>New processor</h1>
+<p class="muted">Start from this skeleton. It becomes a draft: nothing routes to it until it is published, and you can keep editing it until then.</p>
+<form hx-post="/panel/new" hx-target="#problems" hx-disabled-elt="find button">
+  <label>Definition (YAML)
+    <textarea name="text" rows="22" spellcheck="false" class="code">{{ text }}</textarea>
+  </label>
+  <button type="submit">Create draft</button>
+</form>
+<div id="problems"></div>
+{% endblock %}

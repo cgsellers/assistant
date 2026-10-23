@@ -1,0 +1,6 @@
+<div class="problem" role="alert">
+  <p class="error">{{ detail }}</p>
+  {% if problems %}
+  <ul class="problems">{% for p in problems %}<li><code>{{ p }}</code></li>{% endfor %}</ul>
+  {% endif %}
+</div>
