@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Processors{% endblock %} · Ledgerline</title>
+  <link rel="stylesheet" href="/panel/static/panel.css">
+  {# HTMX's inline indicator styles would need style-src 'unsafe-inline'. #}
+  <meta name="htmx-config" content='{"includeIndicatorStyles": false, "allowEval": false}'>
+  <script src="/panel/static/htmx-2.0.4.min.js" defer></script>
+</head>
+{# Every HTMX request from this page carries the session's CSRF token. #}
+<body{% if csrf_token %} hx-headers='{"X-CSRF-Token": "{{ csrf_token }}"}'{% endif %}>
+  <header>
+    <a class="brand" href="/panel">Ledgerline</a>
+    {% if principal %}
+    <nav>
+      <a href="/panel">Processors</a>
+    </nav>
+    <div class="who">
+      <span>{{ principal.name }}</span>
+      <span class="badge {{ principal.role }}">{{ principal.role }}</span>
+      {% if csrf_token %}
+      <button class="link" hx-post="/panel/logout">Sign out</button>
+      {% endif %}
+    </div>
+    {% endif %}
+  </header>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

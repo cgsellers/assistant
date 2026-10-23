@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Processors</h1>
+<p class="muted">One per document format. Routing sends each document to the live version of whichever matches it best.</p>
+{% if processors %}
+<table>
+  <thead>
+    <tr><th>Name</th><th>Status</th><th>Live</th><th>Latest published</th><th>Drafts</th></tr>
+  </thead>
+  <tbody>
+    {% for p in processors %}
+    <tr>
+      <td><a href="/panel/processors/{{ p.name }}">{{ p.name }}</a>
+        {% if p.display_name %}<span class="muted">{{ p.display_name }}</span>{% endif %}</td>
+      <td><span class="badge {{ p.status }}">{{ p.status }}</span></td>
+      <td>{% if p.active_version %}<a href="/panel/processors/{{ p.name }}/versions/{{ p.active_version }}">v{{ p.active_version }}</a>{% else %}—{% endif %}</td>
+      <td>{% if p.latest_published %}v{{ p.latest_published }}{% else %}—{% endif %}</td>
+      <td>{% for d in p.drafts %}<a href="/panel/processors/{{ p.name }}/versions/{{ d }}">v{{ d }}</a>{% if not loop.last %}, {% endif %}{% else %}—{% endfor %}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p>No processors yet. Seed the starter set with <code>uv run python -m doctypes.seed</code>.</p>
+{% endif %}
+{% endblock %}

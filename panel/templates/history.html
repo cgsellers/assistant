@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}{{ name }}{% endblock %}
+{% block content %}
+<p class="crumbs"><a href="/panel">Processors</a> / {{ name }}</p>
+<h1>{{ name }}</h1>
+<p class="muted">Every version ever written. Published versions never change; a draft is edited in place until it is published.</p>
+<table>
+  <thead>
+    <tr><th>Version</th><th>State</th><th>Written by</th><th>Edited from</th><th>When</th><th></th></tr>
+  </thead>
+  <tbody>
+    {% for row in versions %}
+    <tr>
+      <td><a href="/panel/processors/{{ name }}/versions/{{ row.version }}">v{{ row.version }}</a></td>
+      <td>
+        {% if row.is_active %}<span class="badge active">live</span>
+        {% elif row.is_published %}<span class="badge published">published</span>
+        {% else %}<span class="badge draft">draft</span>{% endif %}
+      </td>
+      <td>{{ row.created_by or "—" }}</td>
+      <td>{% if row.based_on_version %}v{{ row.based_on_version }}{% else %}—{% endif %}</td>
+      <td><time datetime="{{ row.created_at.isoformat() }}">{{ row.created_at.strftime("%Y-%m-%d %H:%M") }}</time></td>
+      <td>{% set other = compare[row.version] %}{% if other %}<a href="/panel/processors/{{ name }}/diff?a={{ other }}&amp;b={{ row.version }}">changes from v{{ other }}</a>{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

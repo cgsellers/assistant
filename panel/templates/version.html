@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}{{ row.name }} v{{ row.version }}{% endblock %}
+{% block content %}
+<p class="crumbs"><a href="/panel">Processors</a> / <a href="/panel/processors/{{ row.name }}">{{ row.name }}</a> / v{{ row.version }}</p>
+<h1>{{ row.name }} v{{ row.version }}
+  {% if row.is_active %}<span class="badge active">live</span>
+  {% elif row.is_published %}<span class="badge published">published</span>
+  {% else %}<span class="badge draft">draft</span>{% endif %}
+</h1>
+<dl class="meta">
+  <dt>Written by</dt><dd>{{ row.created_by or "—" }}</dd>
+  <dt>Edited from</dt><dd>{% if row.based_on_version %}v{{ row.based_on_version }}{% else %}— (new processor){% endif %}</dd>
+  <dt>Created</dt><dd>{{ row.created_at.strftime("%Y-%m-%d %H:%M") }} UTC</dd>
+</dl>
+{% if compare_with %}
+<p><a href="/panel/processors/{{ row.name }}/diff?a={{ compare_with }}&amp;b={{ row.version }}">See what changed from v{{ compare_with }}</a></p>
+{% endif %}
+<pre class="code">{{ text }}</pre>
+{% endblock %}

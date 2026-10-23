@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}{{ name }}: v{{ a }} → v{{ b }}{% endblock %}
+{% block content %}
+<p class="crumbs"><a href="/panel">Processors</a> / <a href="/panel/processors/{{ name }}">{{ name }}</a> / v{{ a }} → v{{ b }}</p>
+<h1>{{ name }}: v{{ a }} → v{{ b }}</h1>
+{% if lines %}
+<pre class="code diff">{% for kind, line in lines %}<span class="{{ kind }}">{{ line }}</span>
+{% endfor %}</pre>
+{% else %}
+<p>No differences: the two versions are the same processor.</p>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,71 @@
+/* The panel's only stylesheet. A file rather than inline, so the Content
+   Security Policy can say style-src 'self' and mean it. */
+
+:root {
+  --ink: #1d2330;
+  --muted: #667085;
+  --line: #e4e7ec;
+  --wash: #f6f7f9;
+  --accent: #2f5bea;
+  --good: #067647;
+  --warn: #b54708;
+  --bad: #b42318;
+  font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: var(--ink);
+}
+
+body { margin: 0; background: #fff; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+header {
+  display: flex; align-items: center; gap: 1.5rem;
+  padding: 0.75rem 1.5rem; border-bottom: 1px solid var(--line); background: var(--wash);
+}
+header .brand { font-weight: 700; color: var(--ink); }
+header nav { flex: 1; }
+header .who { display: flex; align-items: center; gap: 0.5rem; color: var(--muted); }
+
+main { max-width: 1100px; margin: 0 auto; padding: 1.5rem; }
+h1 { font-size: 1.5rem; margin: 0.25rem 0 0.5rem; display: flex; align-items: center; gap: 0.6rem; }
+.muted { color: var(--muted); }
+.crumbs { color: var(--muted); margin: 0; font-size: 0.9rem; }
+.narrow { max-width: 360px; margin: 3rem auto; }
+
+table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+th, td { text-align: left; padding: 0.55rem 0.6rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+td .muted { display: block; font-size: 0.85rem; }
+
+.badge {
+  display: inline-block; padding: 0.05rem 0.5rem; border-radius: 999px;
+  font-size: 0.75rem; font-weight: 600; border: 1px solid currentColor;
+}
+.badge.active { color: var(--good); }
+.badge.published { color: var(--muted); }
+.badge.draft, .badge.retired { color: var(--warn); }
+.badge.admin { color: var(--bad); }
+.badge.author { color: var(--accent); }
+
+dl.meta { display: grid; grid-template-columns: max-content 1fr; gap: 0.2rem 1rem; color: var(--muted); }
+dl.meta dd { margin: 0; color: var(--ink); }
+
+pre.code {
+  background: var(--wash); border: 1px solid var(--line); border-radius: 6px;
+  padding: 1rem; overflow-x: auto; font: 13px/1.45 ui-monospace, Menlo, monospace;
+}
+.diff span { display: block; white-space: pre; }
+.diff .add { background: #e7f6ec; color: var(--good); }
+.diff .del { background: #fdecea; color: var(--bad); }
+.diff .hunk { color: var(--accent); }
+.diff .file { color: var(--muted); font-weight: 600; }
+
+form label { display: block; margin: 0.75rem 0; font-weight: 600; font-size: 0.9rem; }
+form input { display: block; width: 100%; box-sizing: border-box; margin-top: 0.3rem;
+  padding: 0.5rem 0.6rem; border: 1px solid var(--line); border-radius: 6px; font: inherit; }
+button { font: inherit; cursor: pointer; padding: 0.5rem 1rem; border-radius: 6px;
+  border: 1px solid var(--accent); background: var(--accent); color: #fff; }
+button.link { background: none; border: none; color: var(--accent); padding: 0; }
+
+.error { color: var(--bad); }
+ul.problems { padding-left: 1.2rem; }

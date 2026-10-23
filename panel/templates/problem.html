@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}Problem{% endblock %}
+{% block content %}
+<h1>That didn't work</h1>
+<p class="error">{{ detail }}</p>
+{% if problems %}
+<ul class="problems">{% for p in problems %}<li><code>{{ p }}</code></li>{% endfor %}</ul>
+{% endif %}
+<p><a href="/panel">Back to processors</a></p>
+{% endblock %}

@@ -21,18 +21,7 @@ from core.models import User, UserSession, utcnow
 PASSWORD = "correct horse battery"
 
 
-@pytest.fixture(autouse=True)
-def _fast_hashing(monkeypatch):
-    """
-    argon2 is slow on purpose, which is the point in production and a few
-    seconds of nothing in a test run. Same algorithm, minimal cost.
-    """
-    from argon2 import PasswordHasher
-
-    monkeypatch.setattr(users, "_hasher", PasswordHasher(time_cost=1, memory_cost=8, parallelism=1))
-    users._dummy_hash.cache_clear()
-    yield
-    users._dummy_hash.cache_clear()
+pytestmark = pytest.mark.usefixtures("fast_hashing")
 
 
 @pytest.fixture

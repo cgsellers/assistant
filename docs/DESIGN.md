@@ -1632,6 +1632,24 @@ Then accounts and sign-in (`core/users.py`, `/auth/login`, `/auth/logout`, `/aut
 with roles enforced on the processor routes: drafting and trials need *author*,
 publishing and retiring *admin*. See the end of §5.22.
 
+Then the first pages (`panel/`): sign-in, the processor list, version history, each
+version shown as seed YAML, and a diff between any two versions. Defaults are left out
+of the YAML, so a field reads as its type and description; a transform's code comes
+out as a `|` block, so it reads and diffs as code. The browser-specific parts:
+
+- **No session means a redirect to sign-in, not JSON**, and only under `/panel`. An
+  HTMX request whose session ran out gets `HX-Redirect` rather than a blank swap.
+- **Signing in is a plain form post**, so it works before any script loads. It is the
+  one state-changing page route without a CSRF token: there is no session yet to ride.
+  Everything else that changes state goes through HTMX, which sends the token from
+  the page in a header.
+- **A strict Content Security Policy on every page**: scripts from this origin only, no
+  inline script or style, no framing. HTMX 2.0.4 is vendored, checked byte for byte
+  against the npm package's published hash, rather than loaded from a CDN. Jinja2
+  escapes everything authors write, and a test puts `<script>` in a display name to
+  prove it. The CSP is the second layer: injected script would not run even if
+  escaping failed.
+
 ### 9.2 Why Postgres
 
 SQLite was right for getting started: nothing to run, and a suite of almost 800 tests in

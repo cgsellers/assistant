@@ -23,11 +23,13 @@ that thread.
 
 from __future__ import annotations
 
+import difflib
 import logging
 from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any
 
+import yaml
 from pydantic import ValidationError
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
@@ -150,6 +152,65 @@ def parse(spec: dict | Definition) -> Definition:
             for error in exc.errors()
         ]
         raise AuthoringError("not a valid processor", details) from None
+
+
+def to_yaml(stored: dict | Definition) -> str:
+    """
+    A version in the seed format: what the panel shows, diffs and edits.
+
+    Defaults are left out, so a field reads `type: money` and its
+    description rather than five lines of `required: false` and nulls; the
+    version number is left out because the server assigns it. Multi-line
+    strings -- a transform's code -- come out as `|` blocks, so code reads
+    and diffs as code. Parsing the result gives back the same definition.
+    """
+    definition = parse(stored if isinstance(stored, Definition) else dict(stored))
+    data = definition.model_dump(mode="json", exclude_defaults=True, exclude={"version"})
+    for spec in data.get("fields", {}).values():
+        _type_first(spec)
+        for item in (spec.get("item_fields") or {}).values():
+            _type_first(item)
+    # A rule's `type` is a default too -- each rule class fixes its own -- but
+    # it is the discriminator, so without it the YAML would not parse back.
+    if definition.rules:
+        data["rules"] = [
+            {"type": rule.type, **dumped}
+            for rule, dumped in zip(definition.rules, data["rules"], strict=True)
+        ]
+    return yaml.dump(data, Dumper=_SeedDumper, sort_keys=False, allow_unicode=True, width=88)
+
+
+def diff(older: dict, newer: dict, *, older_label: str, newer_label: str) -> list[str]:
+    """Unified diff of two versions in their YAML form."""
+    return list(
+        difflib.unified_diff(
+            to_yaml(older).splitlines(),
+            to_yaml(newer).splitlines(),
+            fromfile=older_label,
+            tofile=newer_label,
+            lineterm="",
+        )
+    )
+
+
+def _type_first(spec: dict) -> None:
+    """`type: string` is the default, but a field reads better saying so."""
+    kind = spec.pop("type", "string")
+    rest = dict(spec)
+    spec.clear()
+    spec.update({"type": kind, **rest})
+
+
+class _SeedDumper(yaml.SafeDumper):
+    pass
+
+
+def _str(dumper: yaml.SafeDumper, value: str):
+    style = "|" if "\n" in value else None
+    return dumper.represent_scalar("tag:yaml.org,2002:str", value, style=style)
+
+
+_SeedDumper.add_representer(str, _str)
 
 
 # --- Writing ----------------------------------------------------------------

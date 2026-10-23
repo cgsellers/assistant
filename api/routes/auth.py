@@ -35,6 +35,22 @@ class MeOut(BaseModel):
     csrf_header: str = CSRF_HEADER
 
 
+def set_session_cookie(response: Response, token: str) -> None:
+    """The one place the session cookie's attributes are decided."""
+    settings = get_settings()
+    response.set_cookie(
+        SESSION_COOKIE,
+        token,
+        max_age=settings.session_hours * 3600,
+        httponly=True,
+        secure=settings.session_cookie_secure,
+        # Lax: sent on a top-level navigation to the panel, not on a
+        # cross-site POST. The CSRF token covers what Lax does not.
+        samesite="lax",
+        path="/",
+    )
+
+
 @router.post("/login", response_model=MeOut, summary="Sign in to the panel")
 def login(body: SignInIn, response: Response, session: Session = Depends(get_session)):
     """
@@ -47,18 +63,7 @@ def login(body: SignInIn, response: Response, session: Session = Depends(get_ses
     except users.SignInFailed:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "wrong email or password") from None
 
-    settings = get_settings()
-    response.set_cookie(
-        SESSION_COOKIE,
-        signed_in.token,
-        max_age=settings.session_hours * 3600,
-        httponly=True,
-        secure=settings.session_cookie_secure,
-        # Lax: sent on a top-level navigation to the panel, not on a
-        # cross-site POST. The CSRF token covers what Lax does not.
-        samesite="lax",
-        path="/",
-    )
+    set_session_cookie(response, signed_in.token)
     return MeOut(
         kind="user",
         name=signed_in.user.email,

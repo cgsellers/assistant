@@ -121,6 +121,22 @@ def anon_client(_wired) -> Iterator[TestClient]:
         yield c
 
 
+@pytest.fixture
+def fast_hashing(monkeypatch):
+    """
+    argon2 is slow on purpose, which is the point in production and a few
+    seconds of nothing in a test run. Same algorithm, minimal cost.
+    """
+    from argon2 import PasswordHasher
+
+    from core import users
+
+    monkeypatch.setattr(users, "_hasher", PasswordHasher(time_cost=1, memory_cost=8, parallelism=1))
+    users._dummy_hash.cache_clear()
+    yield
+    users._dummy_hash.cache_clear()
+
+
 # --- Fake OCR engines -------------------------------------------------------
 # These exist because OcrEngine is a Protocol: the worker can be tested with
 # no tesseract binary and no container, which is most of the point of having

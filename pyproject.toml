@@ -20,6 +20,7 @@ dependencies = [
     # Passwords for panel users. Deliberately slow, unlike the SHA-256 that
     # API keys use -- see core/users.py for why the two differ.
     "argon2-cffi>=25.1.0",
+    "jinja2>=3.1.6",
 ]
 
 [dependency-groups]

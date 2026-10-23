@@ -317,7 +317,9 @@ its output goes through the same coercion and rules as the model's, and every fi
 changed is recorded as derived on the extraction and on the ledger row. The model's
 reading stays in `raw_json` untouched. [DESIGN §5.23](docs/DESIGN.md).
 
-**Processors are authored over the API** (the panel will sit on the same calls):
+**Processors are authored in the panel** (`/panel`: sign in, see every processor, its
+version history, each version as YAML, and a diff between any two) **or over the API**,
+which the panel sits on:
 
 | | |
 |---|---|

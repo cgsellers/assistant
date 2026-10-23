@@ -63,7 +63,9 @@ VISIBLE = len(PREFIX) + 8
 #: unauthenticated deploy look healthy and an authenticated one look dead.
 #: The docs are open because this is a project meant to be read; a deployment
 #: that cared would close them.
-PUBLIC_PATHS = frozenset({"/health", "/docs", "/redoc", "/openapi.json", "/auth/login"})
+PUBLIC_PATHS = frozenset(
+    {"/health", "/docs", "/redoc", "/openapi.json", "/auth/login", "/panel/login"}
+)
 
 #: The panel's session cookie. HttpOnly, so page scripts cannot read it.
 SESSION_COOKIE = "ledgerline_session"
