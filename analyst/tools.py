@@ -181,6 +181,7 @@ def list_transactions(
             "currency": r.currency,
             "category": r.category,
             "user_verified": r.user_verified,
+            "derived": r.derived_fields or [],
         }
         for r in session.scalars(stmt)
     ]

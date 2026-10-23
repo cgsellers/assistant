@@ -462,8 +462,8 @@ per-issuer description overrides — and one generic processor interprets all of
 - **Expressiveness.** Rules are a closed vocabulary of seven types, not an expression
   language. Deliberate: a fixed set is pickable from a dropdown and independently
   testable, whereas an embedded expression language is a parser, a sandbox, and a
-  debugging surface. Types needing arbitrary logic get a named Python validator, which
-  keeps that escape hatch in code review rather than in the database.
+  debugging surface. The one place a type does carry code is its transform (§5.23),
+  which computes values rather than judging them.
 - **No per-type tables, therefore no per-type columns.** `extractions.raw_json` is the
   typed layer. Querying JSON is worse than querying a column, and that is the trade — a
   field is promoted to a real column only when code must act on it, which is exactly what
@@ -534,6 +534,56 @@ are open because this is a project meant to be read; a real deployment would clo
 `last_used_at` is written at most once a minute. Recording it on every request turns
 every GET into a write, and SQLite serialises writers -- once a minute is plenty to
 answer "is anyone still using this key".
+
+### 5.23 Transforms: the one place a type carries code
+
+The model reads and code computes. That left a gap: an invoice printing a subtotal and
+tax but no total comes back with the total null, correctly, and the ledger can't take a
+row without an amount. Working the total out is arithmetic. What to work out depends on
+the format, so it belongs to the document type, and no fixed rule vocabulary covers it.
+So a type may carry a **transform**: Python defining `transform(data) -> data`, run on
+each extraction after coercion and before the rules.
+
+The code can sit inline in the definition or in a `.py` file beside the seed. The loader
+reads that file into the definition, so **the stored version carries the code itself**.
+A version is a version of the code too, and an extraction's `schema_version` still says
+exactly what ran.
+
+**Who writes it decides how it runs.** Transforms are written by people, not generated,
+so the threat is mistakes rather than attacks. They run in a child interpreter
+(`python -I -S`): standard library only, an empty environment (so not the API key), a
+scratch working directory, a time limit, and a CPU and memory cap on Linux. That is
+containment: an infinite loop or a crash costs one document, not the worker. It is not
+a sandbox against hostile code, and phase 6's generated templates would need a real one
+(§5.16). Running in-process would have been faster, about 25 ms less per document, but
+then one bad `while` stalls the queue.
+
+**Nothing derived passes for read.**
+
+- `extractions.raw_json` stays exactly what the model returned. The transform's output
+  goes in `transformed_json` beside it, and `derived_fields` lists every field whose
+  value differs from the model's reading. Reformatting doesn't count: `4.5` and `4.50`
+  are the same money.
+- `transactions.derived_fields` lists the ledger columns that came from those fields,
+  e.g. `["amount"]` for a computed total. The analyst agent sees it and is told to say
+  when it quotes a worked-out figure.
+- The eval harness scores `raw_json`, the model's reading, so a transform can't inflate
+  extraction accuracy.
+
+**Its output is held to the same standard.** It is coerced against the same field types
+and checked by the same rules, so a transform can't produce a value its own type would
+reject. A transform that raises or times out doesn't fail the job: the document goes to
+`needs_review` with the exception and line number, and the model's reading is kept.
+Retrying wouldn't help, because the fault is in the type.
+
+**Broken code never becomes the active version.** A transform declares examples (an
+input and the fields expected out), and `seed.sync` runs them for every type it is
+about to write, before writing any. Validating a definition only parses the code and
+never executes it, because definitions are validated on every load.
+
+The first real one is the invoice's: if no total is printed but a subtotal is, total =
+subtotal − discount + tax. The tax is the printed figure, else the sum of the tax lines.
+A printed total is never touched, and no subtotal means nothing is derived.
 
 ---
 
@@ -1472,11 +1522,34 @@ so any caller that gets in sees everything.
 | **3** | Eval harness on labeled receipts; per-field accuracy and cost per document | Measurement before optimisation |
 | 4 | Vision fallback escalation, review queue with corrections, `invoice` type | Cost engineering, human-in-the-loop |
 | 5 | LangGraph: batch fan-out, conditional edges, interrupt/resume at review, reprocessing | Orchestration where justified |
-| 6 | Template-as-code: model generates per-vendor parsers in a sandbox, verified before promotion | Removing the model from the hot path |
+| 6 | Processor authoring: an API and a panel to create, version, publish and retire processors, with a trial run on a sample document and user accounts (§9.1). Then template-as-code: the model drafts processors and per-vendor parsers in a sandbox, verified before promotion | Self-serve document types; removing the model from the hot path |
 | **7** | Analyst agent over `transactions`: read-only tools, citations, approval gate | Agent design as a data consumer |
 | 8 | Outbox + integrations (CSV, then accounting API); UI | Production shape |
 
 Phase 3 deliberately precedes phase 5 — see 5.18.
+
+### 9.1 The processor panel
+
+The panel is for the people who write processors, so they don't have to edit YAML and
+re-run the seed. Four decisions are already settled:
+
+- **API first, panel second.** Endpoints in the FastAPI app do the work: list, show a
+  version, create a version, publish, retire, and trial-run against a sample document.
+  The panel, the phase-6 drafting agent and the tests all call the same endpoints, so
+  validation lives in one place: `Definition`, the nullable cap and the transform
+  examples.
+- **Not Django.** Django admin would need a second ORM mapped onto tables that SQLAlchemy
+  and Alembic already own, and models that drift apart. Its default edit and delete also
+  do the wrong thing here, so they would be overridden anyway. A SQLAlchemy-native admin
+  (e.g. sqladmin) or a small page built from `Definition.model_json_schema()` fits the
+  stack.
+- **Edit means a new version, delete means retire.** `document_types` is append-only
+  because extractions cite the version that produced them. A real delete would orphan
+  them. Retiring deactivates the type: it stops routing and keeps its history.
+- **It needs real users.** The panel saves Python that the worker runs, which makes it a
+  code-execution privilege. The static machine key (§5.22) is not enough for that: it
+  needs per-person accounts, a role allowed to edit transforms, and `created_by` on every
+  version. That is the trigger §5.22 named for revisiting auth.
 
 ---
 
@@ -1567,6 +1640,11 @@ connect, start with [WALKTHROUGH.md](WALKTHROUGH.md).
   256-bit random key has nothing to brute-force.
 - **What doesn't it do?** It's authentication, not authorisation. Any key that gets in
   sees everything. Raise this before they do.
+- **You store Python in the database and run it?** §5.23. People write it, not the model,
+  so it gets containment rather than a sandbox: a separate interpreter, stdlib only, no
+  environment, a time limit. Examples run before a version is stored, and everything it
+  changes is marked derived. A generated transform would change that answer, and the
+  doc says how.
 
 ### Honesty
 

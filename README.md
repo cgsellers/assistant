@@ -285,9 +285,10 @@ One generic processor interprets all of it:
 
 | Stage | What runs |
 |---|---|
-| Route | `match_score()` scores every active type; the highest above its own `min_score` wins. Nothing matches → a model classifier |
+| Route | every active type is scored on whole-word keywords; of those above their own `min_score`, the most signals hit wins. Nothing matches → a model classifier |
 | Profile | `select_profile()` identifies the issuer, tax id first, then name pattern |
 | Extract | `build_json_schema()` renders the fields — descriptions included — and the API constrains the response to that schema |
+| Transform | the type's own Python, if it has one, in a separate interpreter; anything it changes is marked derived |
 | Validate | the rule list is evaluated deterministically; failures land in `extractions.validation_errors` |
 
 **Field descriptions are the prompt.** Pydantic and the API pass `description` through
@@ -297,9 +298,24 @@ to the document type; only the layout belongs to the issuer.
 
 **Rules are a closed vocabulary** — `required`, `positive`, `range`, `sum_equals`,
 `line_items_sum`, `not_future`, `regex` — rather than an expression language. An analyst
-picks from a fixed set in the UI, and every rule is independently testable. A type that
-genuinely needs arbitrary logic gets a named Python validator instead, which keeps the
-escape hatch in code review rather than in the database.
+picks from a fixed set in the UI, and every rule is independently testable.
+
+**Arithmetic is a transform.** The model is told never to compute anything, so an invoice
+that prints a subtotal and tax but no total comes back with the total null. A type can
+carry Python for that, written inline or attached as a file beside the YAML:
+
+```yaml
+transform:
+  file: invoice_transform.py      # defines transform(data) -> data
+  examples:                       # run before a new version is stored
+    - input:    {subtotal: "100.00", tax_amount: "20.00"}
+      expected: {total: "120.00"}
+```
+
+It runs in its own interpreter (standard library only, no environment, a time limit),
+its output goes through the same coercion and rules as the model's, and every field it
+changed is recorded as derived on the extraction and on the ledger row. The model's
+reading stays in `raw_json` untouched. [DESIGN §5.23](docs/DESIGN.md).
 
 Money is `Decimal`, never `float`. It crosses the wire as a string for exactly that
 reason.
@@ -330,7 +346,7 @@ short of the ledger, which is right for one an analyst is still shaping.
 | 3 | Eval harness on labeled receipts; per-field accuracy and cost per document | Measurement before optimization |
 | 4 | Vision fallback escalation, review queue with corrections, `invoice` type | Cost engineering, human-in-the-loop |
 | 5 | LangGraph orchestration: batch fan-out, conditional edges, interrupt/resume at review, reprocessing | Orchestration where justified |
-| 6 | Template-as-code: model generates parsers for recurring vendors in a sandbox, verified before promotion | Removing the model from the hot path |
+| 6 | Processor authoring: API + panel to create, version, publish and retire processors, trial-run on a sample, user accounts. Then template-as-code: the model drafts processors and vendor parsers in a sandbox, verified before promotion | Self-serve document types; removing the model from the hot path |
 | 7 | Analyst agent over `transactions`: read-only tools, citations, approval gate; persistent chat | Agent design as a data consumer |
 | 8 | Outbox + integrations (CSV, then accounting API); UI with upload, review queue, trace view | Production shape |
 

@@ -84,6 +84,29 @@ def to_ledger(definition: Definition, data: dict) -> tuple[dict | None, str | No
     return values, None
 
 
+def derived_columns(definition: Definition, data: dict, derived: list[str]) -> list[str]:
+    """
+    The ledger columns a transform worked out, given the fields it changed.
+
+    This is what keeps the module's promise honest once transforms exist: a
+    column listed here was not read off a page, and the row says so.
+    """
+    mapping = definition.canonical
+    if mapping is None or not derived:
+        return []
+    changed = set(derived)
+    columns = [
+        column for column, name in mapping.referenced().items()
+        if name in changed and column != "tax_lines"
+    ]
+    # The ledger's tax comes from the tax lines when no single figure was
+    # printed, so derived tax lines mean a derived tax.
+    fell_back = mapping.tax_amount is None or data.get(mapping.tax_amount) is None
+    if mapping.tax_lines in changed and fell_back and "tax_amount" not in columns:
+        columns.append("tax_amount")
+    return columns
+
+
 def _sum_taxes(lines: Any) -> Decimal | None:
     """
     The total of separately printed taxes -- added here, in code, because the

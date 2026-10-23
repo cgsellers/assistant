@@ -176,6 +176,12 @@ The model's raw answer, never the coerced one, is stored by
 `core/repository.py: record_extraction` in `extractions`. That table is append-only
 with `is_current`, so a retry adds a row rather than overwriting.
 
+If the type has a **transform** (`doctypes/transform.py: process`), it runs between
+the two steps: the type's own Python, in a separate interpreter, filling in what the
+model was told not to compute, such as a total from subtotal and tax. Its output is
+coerced and checked like the model's. Every field it changed is listed in
+`extractions.derived_fields`, and the model's answer stays untouched in `raw_json`.
+
 - **Any rule fails:** `needs_review`. The answer is kept, because a reviewer needs
   something to correct.
 - **All pass:** `validated`.

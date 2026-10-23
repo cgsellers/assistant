@@ -176,6 +176,25 @@ rules:
     field: total
     message: an invoice total should be positive; a refund belongs to a credit note
 
+# Runs after extraction, before the rules: the rules see the derived total.
+# The examples run before a new version is stored.
+transform:
+  file: invoice_transform.py
+  examples:
+    - input: {subtotal: "100.00", tax_amount: "20.00"}
+      expected: {total: "120.00"}
+    - input:
+        subtotal: "100.00"
+        discount: "10.00"
+        taxes: [{name: GST, amount: "5.00"}, {name: VAT, amount: "3.00"}]
+      expected: {total: "98.00"}
+    - input: {subtotal: "80.00"}
+      expected: {total: "80.00"}
+    - input: {total: "50.00", subtotal: "100.00", tax_amount: "20.00"}
+      expected: {total: "50.00"}
+    - input: {tax_amount: "20.00"}
+      expected: {total: null}
+
 canonical:
   direction: out          # a supplier's invoice: money leaving
   amount: total

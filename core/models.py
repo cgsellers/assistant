@@ -326,6 +326,12 @@ class Extraction(Base):
     #: Empty list means the deterministic rules passed. Null means they have
     #: not run yet.
     validation_errors: Mapped[list | None] = mapped_column(JSON)
+    #: What the document type's transform returned, if it has one and it ran.
+    #: `raw_json` stays exactly what the model read; this is beside it.
+    transformed_json: Mapped[dict | None] = mapped_column(JSON)
+    #: Fields whose value the transform changed or filled in -- not read off
+    #: the page. Null when no transform ran.
+    derived_fields: Mapped[list | None] = mapped_column(JSON)
     is_current: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
 
     #: True for an authoring dry run -- extracted to show the analyst, never
@@ -399,6 +405,10 @@ class Transaction(Base):
     #: Null when the document does not say. Not guessed: a receipt printed in
     #: Spain is usually EUR and "usually" has no place in a ledger.
     currency: Mapped[str | None] = mapped_column(String(3))
+    #: Ledger columns whose value a transform worked out rather than the
+    #: model reading it off the page, e.g. ["amount"] for a computed total.
+    #: Null on rows written before transforms existed.
+    derived_fields: Mapped[list | None] = mapped_column(JSON, default=list)
 
     #: Assigned later, by rules or by a human. Categorisation is not
     #: extraction and does not belong in the same step.

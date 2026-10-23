@@ -28,10 +28,10 @@ from core.db import SessionLocal
 from core.models import Document, DocumentEvent, Job, OcrResult, utcnow
 from core.status import DocStatus, JobKind, JobStatus
 from doctypes import registry
-from doctypes.canonical import to_ledger
+from doctypes.canonical import derived_columns, to_ledger
 from doctypes.definition import Definition
 from doctypes.schema import build_json_schema
-from doctypes.validate import validate
+from doctypes.transform import Processed, process
 from llm import get_extractor
 from llm.base import ExtractionError, ExtractionRefused, Extractor
 from ocr import get_engine
@@ -323,9 +323,11 @@ def run_extract_job(session: Session, job: Job, extractor: Extractor) -> None:
 
     # raw_json stores what the model actually returned, not the coerced values:
     # Decimal and date do not survive a JSON column, and the raw answer is the
-    # evidence an eval run has to score against. The coerced values are what
-    # the ledger is built from, which is why both come back here.
-    coerced, errors = validate(definition, result.data)
+    # evidence an eval run has to score against. The ledger is built from the
+    # coerced values -- after the type's transform, if it has one, which is
+    # stored beside the raw answer rather than over it.
+    processed = process(definition, result.data)
+    errors = processed.errors
 
     extraction = repository.record_extraction(
         session,
@@ -336,6 +338,8 @@ def run_extract_job(session: Session, job: Job, extractor: Extractor) -> None:
         profile=match.profile_key,
         raw_json=result.data,
         validation_errors=errors,
+        transformed_json=processed.transformed,
+        derived_fields=processed.derived if definition.transform else None,
         input_tokens=result.input_tokens,
         output_tokens=result.output_tokens,
         cache_read_tokens=result.cache_read_tokens,
@@ -373,7 +377,7 @@ def run_extract_job(session: Session, job: Job, extractor: Extractor) -> None:
     _record_transition(session, document, DocStatus.VALIDATED, None)
     session.commit()
 
-    _commit_to_ledger(session, document, definition, extraction, coerced)
+    _commit_to_ledger(session, document, definition, extraction, processed)
 
     job.status = JobStatus.DONE
     job.last_error = None
@@ -390,7 +394,7 @@ def _commit_to_ledger(
     document: Document,
     definition: Definition,
     extraction,
-    coerced: dict,
+    processed: Processed,
 ) -> None:
     """
     Write the canonical row, or record why the document stops at `validated`.
@@ -400,10 +404,11 @@ def _commit_to_ledger(
     still shaping. Stopping with the reason in the audit trail is more useful
     than inventing a row or failing the job.
     """
-    values, reason = to_ledger(definition, coerced)
+    values, reason = to_ledger(definition, processed.data)
     if values is None:
         log.info("document=%s stays validated: %s", document.id[:8], reason)
         return
+    values["derived_fields"] = derived_columns(definition, processed.data, processed.derived)
 
     transaction = repository.record_transaction(
         session, extraction=extraction, values=values
@@ -417,6 +422,7 @@ def _commit_to_ledger(
             "amount": money.to_str(transaction.amount),
             "currency": transaction.currency,
             "direction": transaction.direction,
+            "derived": transaction.derived_fields,
         },
     )
 

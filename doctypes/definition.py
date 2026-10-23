@@ -3,7 +3,8 @@ The document type definition format.
 
 A document type is data, not code: field names with the descriptions that tell
 the model where to look, deterministic matchers for routing, validation rules,
-and optional per-issuer description overrides.
+and optional per-issuer description overrides. The one exception is an
+optional `transform`, for arithmetic the model is told not to do.
 
 The format is itself a Pydantic model, which buys three things:
 
@@ -17,6 +18,7 @@ The format is itself a Pydantic model, which buys three things:
 
 from __future__ import annotations
 
+import ast
 import re
 from enum import StrEnum
 from typing import Annotated, Literal
@@ -117,8 +119,7 @@ class Matchers(BaseModel):
 # --- Validation rules -------------------------------------------------------
 # A small closed vocabulary rather than an expression language: an analyst
 # picks from a fixed set in the UI, and every rule is independently testable.
-# Types that genuinely need arbitrary logic get a named Python validator via
-# `python_rules` instead.
+# Computing values rather than checking them is a `Transform`'s job.
 
 
 class _Rule(BaseModel):
@@ -288,6 +289,62 @@ class CanonicalMap(BaseModel):
         }
 
 
+class TransformExample(BaseModel):
+    """
+    One worked case for a transform: given this extraction, these fields
+    should come out. Run before a definition is stored, so a transform that
+    breaks fails when it is saved rather than on a live document.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    #: Extracted data as the transform receives it: money as strings, dates
+    #: as YYYY-MM-DD.
+    input: dict
+    #: Only the fields listed are checked; the rest may be anything.
+    expected: dict = Field(min_length=1)
+
+
+class Transform(BaseModel):
+    """
+    Python that runs on an extraction after the model has read it.
+
+    For what the model is told not to do -- arithmetic, mostly. The code must
+    define `transform(data: dict) -> dict`. It is written by people, not
+    generated, and runs in a separate interpreter with the standard library
+    only and a time limit (doctypes.transform). Whatever it changes is
+    recorded as derived, and its output is validated like the model's.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    #: The source. A seed file may give `file: name.py` instead, which the
+    #: loader reads into here -- the stored definition always carries the
+    #: code itself, so a version is a version of the code too.
+    code: str = Field(min_length=1, max_length=50_000)
+    timeout_seconds: float = Field(default=2.0, gt=0, le=30)
+    examples: list[TransformExample] = Field(default_factory=list)
+
+    @field_validator("code")
+    @classmethod
+    def _defines_transform(cls, code: str) -> str:
+        """Parsed, never executed: a definition is validated on every load."""
+        try:
+            tree = ast.parse(code)
+        except SyntaxError as exc:
+            raise ValueError(f"transform code does not parse: {exc}") from exc
+        functions = [
+            node for node in tree.body
+            if isinstance(node, ast.FunctionDef) and node.name == "transform"
+        ]
+        if not functions:
+            raise ValueError("transform code must define a top-level `transform(data)`")
+        arguments = functions[-1].args
+        if len(arguments.posonlyargs) + len(arguments.args) != 1:
+            raise ValueError("`transform` must take exactly one argument, the data")
+        return code
+
+
 class Definition(BaseModel):
     """A complete document type."""
 
@@ -306,6 +363,8 @@ class Definition(BaseModel):
     #: one is extracted and validated but never reaches the ledger, which is
     #: the right behaviour for a type an analyst is still shaping.
     canonical: CanonicalMap | None = None
+    #: Code run on each extraction before validation and the ledger.
+    transform: Transform | None = None
 
     @field_validator("fields")
     @classmethod

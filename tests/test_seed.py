@@ -243,7 +243,10 @@ class TestTheInvoiceType:
 
     def test_an_italian_receipt_still_routes_to_receipt(self):
         """It used to, only because `total` matched inside TOTALE."""
-        text = "SUPERMERCATO\nDOCUMENTO COMMERCIALE\nPANE 1,20\nTOTALE COMPLESSIVO 1,20\ndi cui IVA 0,05"
+        text = (
+            "SUPERMERCATO\nDOCUMENTO COMMERCIALE\nPANE 1,20\n"
+            "TOTALE COMPLESSIVO 1,20\ndi cui IVA 0,05"
+        )
         picked = registry.pick(list(self._types().values()), text)
         assert picked is not None
         assert picked[0].name == "receipt"
