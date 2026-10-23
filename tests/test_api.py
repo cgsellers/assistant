@@ -214,4 +214,11 @@ class TestOpenApi:
             "/documents/{document_id}/ocr",
             "/costs",
             "/health",
+            "/processors",
+            "/processors/{name}",
+            "/processors/{name}/versions/{version}",
+            "/processors/{name}/versions/{version}/publish",
+            "/processors/{name}/retire",
+            "/processors/{name}/versions/{version}/trial",
+            "/processors/{name}/versions/{version}/trial/file",
         }

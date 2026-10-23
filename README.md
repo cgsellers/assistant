@@ -317,6 +317,17 @@ its output goes through the same coercion and rules as the model's, and every fi
 changed is recorded as derived on the extraction and on the ledger row. The model's
 reading stays in `raw_json` untouched. [DESIGN §5.23](docs/DESIGN.md).
 
+**Processors are authored over the API** (the panel will sit on the same calls):
+
+| | |
+|---|---|
+| `POST /processors` | start a draft, as JSON or seed YAML; `based_on_version` to edit an existing one |
+| `PUT /processors/{name}/versions/{v}` | save over a draft (published versions never change) |
+| `POST …/versions/{v}/trial` | try any version, drafts included, on a stored document or text: routing scores, extraction, errors, derived fields, cost |
+| `POST …/versions/{v}/trial/file` | the same on an uploaded sample, read like a real document but not ingested |
+| `POST …/versions/{v}/publish` | make it live; **409** if someone published since the draft was started |
+| `POST /processors/{name}/retire` | stop routing to it; nothing is deleted |
+
 Money is `Decimal`, never `float`. It crosses the wire as a string for exactly that
 reason.
 

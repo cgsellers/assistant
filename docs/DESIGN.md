@@ -1594,6 +1594,14 @@ re-run the seed. Decided:
   trial runs) and *admin* (publishing, which puts code live). This is the trigger §5.22
   named for revisiting auth.
 
+**Built so far:** the functions and the JSON API (`api/routes/processors.py`).
+Publishing locks the type's rows before the version check, so two racing publishes
+serialise on Postgres instead of both passing. A trial on loose text or an uploaded
+sample is returned and not stored: ingesting a sample would deduplicate the real copy
+away when it later arrives. Checked live against the real model: a draft of `invoice`
+tried on text with no total line came back with the total null, the transform derived
+it as 107.99, and publishing a stale draft returned 409 naming v3.
+
 ### 9.2 Why Postgres
 
 SQLite was right for getting started: nothing to run, and a suite of almost 800 tests in

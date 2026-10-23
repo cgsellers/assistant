@@ -129,6 +129,8 @@ def create_document_type_version(
     *,
     publish: bool = True,
     activate: bool = True,
+    created_by: str | None = None,
+    based_on_version: int | None = None,
 ) -> DocumentTypeDefinition:
     """
     Write a new version of a document type.
@@ -180,6 +182,8 @@ def create_document_type_version(
         definition=stored.model_dump(mode="json"),
         is_active=activate,
         is_published=publish,
+        created_by=created_by,
+        based_on_version=based_on_version,
     )
     session.add(row)
     session.commit()

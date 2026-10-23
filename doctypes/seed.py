@@ -128,7 +128,12 @@ def sync(session: Session, definitions: list[Definition]) -> dict[str, str]:
     check_transforms([d for d, _ in pending])
 
     for definition, active in pending:
-        row = repository.create_document_type_version(session, definition)
+        row = repository.create_document_type_version(
+            session,
+            definition,
+            created_by="seed",
+            based_on_version=None if active is None else active.version,
+        )
         actions[definition.name] = (
             f"created (v{row.version})" if active is None else f"updated (v{row.version})"
         )

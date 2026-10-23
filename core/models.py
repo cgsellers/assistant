@@ -282,6 +282,13 @@ class DocumentTypeDefinition(Base):
     #: False for types an analyst is still authoring against sample documents.
     is_published: Mapped[bool] = mapped_column(Boolean, default=False)
 
+    #: Who wrote this version: "seed", "key:<name>", later a user.
+    created_by: Mapped[str | None] = mapped_column(String(200))
+    #: The published version this one was edited from; null for a new type.
+    #: Publishing refuses if a newer version has been published since, so two
+    #: people editing the same type cannot silently overwrite each other.
+    based_on_version: Mapped[int | None] = mapped_column(Integer)
+
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         UTCDateTime, default=utcnow, onupdate=utcnow

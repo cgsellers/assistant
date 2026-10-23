@@ -6,10 +6,11 @@ from fastapi import Depends, FastAPI
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from api.routes import costs, documents
+from api.routes import costs, documents, processors
 from core.auth import require_api_key
 from core.config import get_settings
 from core.db import get_session
+from doctypes.authoring import AuthoringError
 
 log = logging.getLogger("api")
 
@@ -36,6 +37,8 @@ app = FastAPI(
 
 app.include_router(documents.router)
 app.include_router(costs.router)
+app.include_router(processors.router)
+app.add_exception_handler(AuthoringError, processors.authoring_error)
 
 
 @app.get("/health")

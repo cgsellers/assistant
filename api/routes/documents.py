@@ -16,7 +16,7 @@ from core.db import get_session
 router = APIRouter(prefix="/documents", tags=["documents"])
 
 
-def _validate(data: bytes) -> str:
+def check_upload(data: bytes) -> str:
     """Size and type checks. Returns the detected mime type, or raises 4xx."""
     settings = get_settings()
 
@@ -46,7 +46,7 @@ def _validate(data: bytes) -> str:
 
 
 def _ingest(session: Session, data: bytes, filename: str | None) -> DocumentOut:
-    mime = _validate(data)
+    mime = check_upload(data)
     document, created = repository.ingest(
         session, data=data, mime_type=mime, original_filename=filename
     )
