@@ -63,6 +63,7 @@ def ingest(
     # sweeper can collect; a row pointing at a missing file breaks the worker.
     key = storage.save(data, digest)
 
+    original_filename = _fit_filename(original_filename)
     document = Document(
         sha256=digest,
         storage_key=key,
@@ -102,6 +103,22 @@ def ingest(
 
     session.commit()
     return document, True
+
+
+#: documents.original_filename is VARCHAR(255). SQLite ignored that; Postgres
+#: enforces it, and the name is whatever the uploader sent.
+FILENAME_LIMIT = 255
+
+
+def _fit_filename(name: str | None) -> str | None:
+    """
+    An uploader's filename, cut to fit its column. The end is kept, so a long
+    name still shows its extension -- the part a person reads to know what the
+    file was. It is only ever displayed; the stored file is named by its hash.
+    """
+    if name is None or len(name) <= FILENAME_LIMIT:
+        return name
+    return "…" + name[-(FILENAME_LIMIT - 1):]
 
 
 # --- Phase 2: document types and extractions --------------------------------

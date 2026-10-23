@@ -31,6 +31,7 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 from core.money import normalise
@@ -64,9 +65,15 @@ class UTCDateTime(TypeDecorator):
     So: convert to UTC on the way in, tag as UTC on the way out. Postgres has
     a real timestamptz, so there we leave the value aware and let the database
     do the work.
+
+    The column is `DateTime(timezone=True)` for that reason. It was a plain
+    `DateTime` once, which made every Postgres column after the first
+    migration a `timestamp without time zone` -- where an aware value is
+    silently converted using the server's TimeZone setting, so what was
+    stored depended on how the database happened to be configured.
     """
 
-    impl = DateTime
+    impl = DateTime(timezone=True)
     cache_ok = True
 
     def process_bind_param(self, value: datetime | None, dialect) -> datetime | None:
@@ -81,6 +88,14 @@ class UTCDateTime(TypeDecorator):
         if value is None:
             return None
         return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+
+#: JSON columns: JSONB on Postgres, plain JSON elsewhere. JSONB is parsed once
+#: on write, can be indexed and queried by key -- "every invoice with PO 4471"
+#: is a query on raw_json -- and compares by value. SQLite has one JSON type,
+#: so there it is the same column it always was. JSONB does not keep key
+#: order, which is why a processor's definition is not one of these.
+JsonType = JSON().with_variant(JSONB(), "postgresql")
 
 
 def new_id() -> str:
@@ -172,11 +187,11 @@ class OcrResult(Base):
     engine_version: Mapped[str | None] = mapped_column(String(100))
     # Engine-specific knobs (language, dpi, model size) so an eval run can be
     # reproduced exactly from the row.
-    params: Mapped[dict | None] = mapped_column(JSON)
+    params: Mapped[dict | None] = mapped_column(JsonType)
     full_text: Mapped[str] = mapped_column(Text)
     # [{"text": ..., "bbox": [x0, y0, x1, y1], "confidence": 0.98, "page": 1}, ...]
     # Bounding boxes are what let the analyst cite a spot on the page.
-    layout_blocks: Mapped[list] = mapped_column(JSON)
+    layout_blocks: Mapped[list] = mapped_column(JsonType)
     mean_confidence: Mapped[float | None] = mapped_column(Float)  # null for VLMs
     created_at: Mapped[datetime] = mapped_column(
         UTCDateTime, default=utcnow
@@ -195,7 +210,7 @@ class DocumentEvent(Base):
     document_id: Mapped[str] = mapped_column(ForeignKey("documents.id"), index=True)
     from_status: Mapped[str | None] = mapped_column(String(32))  # null on creation
     to_status: Mapped[str] = mapped_column(String(32))
-    detail: Mapped[dict | None] = mapped_column(JSON)  # error text, timings, ...
+    detail: Mapped[dict | None] = mapped_column(JsonType)  # error text, timings, ...
     created_at: Mapped[datetime] = mapped_column(
         UTCDateTime, default=utcnow
     )
@@ -277,6 +292,12 @@ class DocumentTypeDefinition(Base):
     # The whole definition: {fields: {...}, matches: {...}, rules: [...],
     # profiles: {...}}. One column rather than several tables because the UI
     # edits and versions it as a single document.
+    #
+    # Plain JSON on Postgres too, never JSONB: JSONB sorts object keys, and
+    # the order of `fields` is the author's -- it is the order the model is
+    # shown them, the panel lists them and a draft label reads. Running the
+    # suite on Postgres caught it reordering them. Nothing queries inside a
+    # definition, so JSONB would buy nothing here.
     definition: Mapped[dict] = mapped_column(JSON)
 
     #: Only one version per name should be active at a time.
@@ -284,8 +305,10 @@ class DocumentTypeDefinition(Base):
     #: False for types an analyst is still authoring against sample documents.
     is_published: Mapped[bool] = mapped_column(Boolean, default=False)
 
-    #: Who wrote this version: "seed", "key:<name>", later a user.
-    created_by: Mapped[str | None] = mapped_column(String(200))
+    #: Who wrote this version: "seed", "key:<name>", "user:<email>", with
+    #: " (ai draft)" when a model drafted it. Wide enough for the longest legal
+    #: email (254) plus both: 200 was not, and Postgres enforces the limit.
+    created_by: Mapped[str | None] = mapped_column(String(320))
     #: The published version this one was edited from; null for a new type.
     #: Publishing refuses if a newer version has been published since, so two
     #: people editing the same type cannot silently overwrite each other.
@@ -339,16 +362,16 @@ class Extraction(Base):
     attempt: Mapped[int] = mapped_column(Integer, default=1)
     model_used: Mapped[str] = mapped_column(String(100))
 
-    raw_json: Mapped[dict | None] = mapped_column(JSON)
+    raw_json: Mapped[dict | None] = mapped_column(JsonType)
     #: Empty list means the deterministic rules passed. Null means they have
     #: not run yet.
-    validation_errors: Mapped[list | None] = mapped_column(JSON)
+    validation_errors: Mapped[list | None] = mapped_column(JsonType)
     #: What the document type's transform returned, if it has one and it ran.
     #: `raw_json` stays exactly what the model read; this is beside it.
-    transformed_json: Mapped[dict | None] = mapped_column(JSON)
+    transformed_json: Mapped[dict | None] = mapped_column(JsonType)
     #: Fields whose value the transform changed or filled in -- not read off
     #: the page. Null when no transform ran.
-    derived_fields: Mapped[list | None] = mapped_column(JSON)
+    derived_fields: Mapped[list | None] = mapped_column(JsonType)
     is_current: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
 
     #: True for an authoring dry run -- extracted to show the analyst, never
@@ -431,7 +454,7 @@ class Transaction(Base):
     #: Ledger columns whose value a transform worked out rather than the
     #: model reading it off the page, e.g. ["amount"] for a computed total.
     #: Null on rows written before transforms existed.
-    derived_fields: Mapped[list | None] = mapped_column(JSON, default=list)
+    derived_fields: Mapped[list | None] = mapped_column(JsonType, default=list)
 
     #: Assigned later, by rules or by a human. Categorisation is not
     #: extraction and does not belong in the same step.

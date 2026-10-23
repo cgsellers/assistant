@@ -352,7 +352,8 @@ class Definition(BaseModel):
 
     name: str = Field(pattern=r"^[a-z][a-z0-9_]{0,48}$")
     version: int = Field(default=1, ge=1)
-    display_name: str | None = None
+    #: Its column is VARCHAR(200), which Postgres enforces.
+    display_name: str | None = Field(default=None, max_length=200)
     description: str | None = None
 
     matches: Matchers
@@ -407,6 +408,9 @@ class Definition(BaseModel):
                     )
 
         for key, profile in self.profiles.items():
+            if len(key) > 100:
+                # Stored on every extraction that uses it, in VARCHAR(100).
+                raise ValueError(f"profile name {key[:20]!r}... is longer than 100 characters")
             unknown = set(profile.descriptions) - known
             if unknown:
                 raise ValueError(

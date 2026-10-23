@@ -50,6 +50,11 @@ def create_db_engine(url: str) -> Engine:
         # turn that check off; SQLAlchemy's pool still hands each request its
         # own connection.
         connect_args={"check_same_thread": False} if is_sqlite else {},
+        # A server-side database drops idle connections -- a restart, a
+        # failover, a proxy's idle timeout -- and the worker holds its pool for
+        # days. Checking a connection on checkout costs a round trip and saves
+        # the first query after a quiet hour from failing.
+        pool_pre_ping=not is_sqlite,
     )
     if engine.dialect.name == "sqlite":
         _register_sqlite_pragmas(engine)

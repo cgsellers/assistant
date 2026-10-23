@@ -4,17 +4,28 @@ Shared fixtures.
 The important one is `settings`: it repoints the whole application at a
 throwaway database and file store under pytest's tmp_path, so no test can
 touch ./data/. Everything else builds on it.
+
+The suite runs on SQLite by default: a fresh file per test, no service to
+start. Set TEST_DATABASE_URL to run all of it against Postgres instead --
+
+    TEST_DATABASE_URL=postgresql+psycopg://ledgerline:ledgerline@127.0.0.1:5432/ledgerline_test
+
+-- which is what CI does, because the two differ in exactly the ways that
+matter here: Postgres enforces column lengths, has real timestamps and exact
+decimals, and locks rows. The schema is built once per run there and every
+table emptied between tests; building it per test would take minutes.
 """
 
 from __future__ import annotations
 
 import io
+import os
 from collections.abc import Iterator
 from decimal import Decimal
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import Engine
+from sqlalchemy import Engine, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from api.main import app
@@ -24,6 +35,13 @@ from core.models import Base
 from doctypes.definition import Definition
 from llm.base import ExtractionResult
 from ocr.base import OcrError, OcrOutput, TextBlock
+
+TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
+ON_POSTGRES = bool(TEST_DATABASE_URL)
+
+#: For the few tests about SQLite's own quirks -- its foreign keys being off
+#: by default, its naive datetimes -- which have nothing to test on Postgres.
+sqlite_only = pytest.mark.skipif(ON_POSTGRES, reason="tests a SQLite-specific behaviour")
 
 # --- A real 1x1 PNG, for tests that need valid bytes but no actual text ---
 TINY_PNG = (
@@ -42,7 +60,9 @@ def settings(tmp_path, monkeypatch) -> Iterator[Settings]:
     this test sees the override, and once afterwards so the next test does not
     inherit a tmp_path that has since been deleted.
     """
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'test.db'}")
+    monkeypatch.setenv(
+        "DATABASE_URL", TEST_DATABASE_URL or f"sqlite:///{tmp_path / 'test.db'}"
+    )
     monkeypatch.setenv("STORAGE_DIR", str(tmp_path / "files"))
     # Pinned, because a developer's .env may relax them for local work -- and
     # the tests are what prove the production values behave.
@@ -53,14 +73,31 @@ def settings(tmp_path, monkeypatch) -> Iterator[Settings]:
     get_settings.cache_clear()
 
 
+@pytest.fixture(scope="session")
+def _postgres_engine() -> Iterator[Engine]:
+    """One schema for the whole run, rebuilt at the start so it matches the models."""
+    engine = create_db_engine(TEST_DATABASE_URL)
+    Base.metadata.drop_all(engine)
+    Base.metadata.create_all(engine)
+    yield engine
+    engine.dispose()
+
+
 @pytest.fixture
-def db_engine(settings) -> Iterator[Engine]:
+def db_engine(settings, request) -> Iterator[Engine]:
     """
-    A fresh schema per test.
+    A fresh schema per test: a new SQLite file, or empty Postgres tables.
 
     create_all rather than running migrations: it is far faster, and the
     migration is separately checked for drift by `alembic check` in CI.
     """
+    if ON_POSTGRES:
+        engine = request.getfixturevalue("_postgres_engine")
+        tables = ", ".join(table.name for table in Base.metadata.sorted_tables)
+        with engine.begin() as connection:
+            connection.execute(text(f"TRUNCATE {tables} RESTART IDENTITY CASCADE"))
+        yield engine
+        return
     engine = create_db_engine(settings.database_url)
     Base.metadata.create_all(engine)
     yield engine

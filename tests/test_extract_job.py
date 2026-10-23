@@ -19,7 +19,7 @@ from doctypes import registry
 from llm.base import ExtractionError, ExtractionRefused
 from worker import run as worker
 
-from .conftest import TINY_PNG, FakeExtractor, receipt_definition
+from .conftest import TINY_PNG, FakeExtractor, receipt_definition, sqlite_only
 
 OCR_TEXT = "CAFE LUNA\nTOTAL\n9.35"
 
@@ -114,6 +114,7 @@ class TestPermanentFailures:
         assert job.status == JobStatus.FAILED
         assert "no OCR result" in job.last_error
 
+    @sqlite_only
     def test_a_vanished_document_fails_the_job_without_a_transition(self, session, ready):
         """
         Same defensive guard as run_ocr_job, and the same proof that it cannot

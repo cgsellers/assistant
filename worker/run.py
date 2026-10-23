@@ -49,8 +49,15 @@ BACKOFF_BASE_SECONDS = 4
 
 
 def worker_id() -> str:
-    """Identifies who holds a lock, so a stale one can be attributed."""
-    return f"{socket.gethostname()}:{os.getpid()}"
+    """
+    Identifies who holds a lock, so a stale one can be attributed.
+
+    Cut to jobs.locked_by's 100 characters: a fully qualified hostname can
+    run past that, and on Postgres an over-long value fails the claim -- on
+    every poll, so the worker would never take a job at all.
+    """
+    pid = f":{os.getpid()}"
+    return socket.gethostname()[: 100 - len(pid)] + pid
 
 
 def claim(session: Session, *, me: str) -> Job | None:
@@ -67,24 +74,31 @@ def claim(session: Session, *, me: str) -> Job | None:
     so the subquery is sufficient here.
     """
     now = utcnow()
-    oldest_ready = (
+    ready = (
         select(Job.id)
         .where(Job.status == JobStatus.QUEUED, Job.run_after <= now)
         .order_by(Job.run_after)
         .limit(1)
-        .scalar_subquery()
     )
-    claimed_id = session.scalar(
-        update(Job)
-        .where(Job.id == oldest_ready)
-        .values(
-            status=JobStatus.RUNNING,
-            locked_by=me,
-            locked_at=now,
-            attempts=Job.attempts + 1,
+    claim = update(Job).values(
+        status=JobStatus.RUNNING,
+        locked_by=me,
+        locked_at=now,
+        attempts=Job.attempts + 1,
+    )
+
+    if session.get_bind().dialect.name == "postgresql":
+        # Lock the row while choosing it, and skip rows another worker has
+        # locked: ten workers polling at once each take a different job
+        # instead of queueing behind one row lock. The UPDATE is in the same
+        # transaction, so the row is never visible as unclaimed in between.
+        claimed_id = session.scalar(ready.with_for_update(skip_locked=True))
+        if claimed_id is not None:
+            session.execute(claim.where(Job.id == claimed_id))
+    else:
+        claimed_id = session.scalar(
+            claim.where(Job.id == ready.scalar_subquery()).returning(Job.id)
         )
-        .returning(Job.id)
-    )
     session.commit()
 
     return session.get(Job, claimed_id) if claimed_id else None

@@ -77,6 +77,12 @@ def create(
     if role not in ROLES:
         raise ValueError(f"role must be one of {ROLES}")
     email = _normalise(email)
+    # The columns' limits, checked here so the CLI says so instead of the
+    # database failing the insert.
+    if len(email) > 254:
+        raise ValueError("an email address is at most 254 characters")
+    if name is not None and len(name) > 200:
+        raise ValueError("a name is at most 200 characters")
     if session.scalar(select(User).where(User.email == email)) is not None:
         raise ValueError(f"{email} already has an account")
     user = User(email=email, name=name, role=role, password_hash=hash_password(password))

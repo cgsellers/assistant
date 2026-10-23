@@ -1,8 +1,28 @@
-# Development compose. Only the OCR sidecar runs here; the API and worker are
-# run directly with `uv run` so that --reload works and breakpoints are usable.
-# They join this file when there is a deployment target to match.
+# Development compose. The OCR sidecar and Postgres run here; the API and worker
+# are run directly with `uv run` so that --reload works and breakpoints are
+# usable. They join this file when there is a deployment target to match.
 
 services:
+  db:
+    image: postgres:17
+    container_name: ledgerline-db
+    environment:
+      POSTGRES_USER: ledgerline
+      # Local development only; a deployment takes its password from a secret.
+      POSTGRES_PASSWORD: ledgerline
+      POSTGRES_DB: ledgerline
+    ports:
+      # Loopback only: nothing off this machine reaches the database.
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ledgerline -d ledgerline"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
   ocr:
     build: ./services/ocr_service
     image: ledgerline-ocr:dev
@@ -40,3 +60,6 @@ services:
       retries: 3
 
     restart: unless-stopped
+
+volumes:
+  pgdata:

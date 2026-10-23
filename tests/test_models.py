@@ -10,7 +10,7 @@ from sqlalchemy import event, select
 from core import repository
 from core.models import Job, utcnow
 
-from .conftest import TINY_PNG
+from .conftest import TINY_PNG, sqlite_only
 
 
 @pytest.fixture
@@ -91,6 +91,7 @@ class TestUTCDateTimeRoundTrip:
 
 
 class TestBindParameters:
+    @sqlite_only
     def test_no_offset_suffix_reaches_sqlite(self, session, db_engine):
         """
         The subtler half of the bug: an aware value bound directly made SQLite

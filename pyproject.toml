@@ -21,6 +21,9 @@ dependencies = [
     # API keys use -- see core/users.py for why the two differ.
     "argon2-cffi>=25.1.0",
     "jinja2>=3.1.6",
+    # Postgres, from step 2 (DESIGN §9.2). psycopg 3; the binary wheel so a
+    # laptop needs no libpq. SQLite stays for local work and the fast suite.
+    "psycopg[binary]>=3.3.6",
 ]
 
 [dependency-groups]

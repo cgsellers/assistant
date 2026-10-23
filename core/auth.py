@@ -122,6 +122,8 @@ def create(session: Session, name: str, *, role: str = Role.AUTHOR) -> tuple[Api
     Mint a key. Returns the row and the secret, which is the only time the
     secret exists anywhere.
     """
+    if len(name) > 200:
+        raise ValueError("a key's name is at most 200 characters")
     secret = generate()
     row = ApiKey(
         name=name, key_hash=fingerprint(secret), prefix=secret[:VISIBLE], role=Role(role)

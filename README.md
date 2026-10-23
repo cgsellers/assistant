@@ -376,7 +376,7 @@ before/after numbers rather than asserted.
 
 - **API:** Python 3.12, FastAPI, SQLAlchemy 2.0, Alembic
 - **Tooling:** uv for dependencies and virtualenv, ruff for lint and format, pytest
-- **DB:** SQLite (dev, WAL mode) → Postgres
+- **DB:** Postgres 17; SQLite (WAL mode) for zero-setup local work and the fast test run. The suite runs on both
 - **Queue:** DB-backed `jobs` table polled by a worker (Redis later if needed)
 - **OCR:** self-hosted, behind an `OcrEngine` protocol, in its own container (PP-OCR models on ONNX Runtime; Tesseract as test double). Born-digital PDFs skip it: their embedded text layer is read directly, exactly, in milliseconds
 - **Models:** Anthropic API behind an `Extractor` protocol, using structured outputs; cheap tier for extraction, strong tier for fallback and analysis
@@ -415,6 +415,11 @@ The panel's session cookie is `Secure`, so it is only sent over https. Chrome an
 make an exception for `localhost`; Safari may not, which looks like signing in and landing
 back on the form. For plain-http local work, add `SESSION_COOKIE_SECURE=false` to `.env`
 and restart. Never in a deployment.
+
+To run on Postgres instead, start it with `docker compose up -d db` and use the
+`DATABASE_URL` shown in `.env.example`. The test suite runs on either: it uses SQLite
+unless `TEST_DATABASE_URL` points it at Postgres (create the database first with
+`docker exec ledgerline-db createdb -U ledgerline ledgerline_test`).
 
 Lint and tests:
 

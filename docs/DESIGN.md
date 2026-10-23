@@ -1774,6 +1774,36 @@ these and fixed them:
 - The worker built a new model client, and new connections, for every job. It now
   builds one.
 
+**Then the switch itself (step 2.1).** Postgres 17 runs in compose for development. The
+whole suite runs against it with `TEST_DATABASE_URL` set: the schema is built once and
+every table truncated between tests. Running it found four things SQLite had hidden:
+
+- **Timestamps were half naive.** The first migration was written by hand with
+  timezone-aware columns. Every later one was generated from `UTCDateTime`, whose impl
+  was a plain `DateTime`, so 14 Postgres columns were `timestamp without time zone`.
+  Postgres converts an aware value into those using the server's `TimeZone` setting,
+  so what got stored depended on configuration. `alembic check` had missed it, because
+  it compared the TypeDecorator itself with the column; it now compares the impl. A
+  Postgres-only migration converts those columns, reading the old values as UTC.
+- **`JSONB` sorts object keys.** Extraction data became `JSONB` for indexing and
+  querying by key. A processor's `definition` stays plain `JSON`, because its field
+  order is the author's: it's the order the model sees fields, the panel lists them
+  and a draft label reads. A test caught `JSONB` reordering them.
+- **Column lengths are enforced.** An uploader's 300-character filename was a 500 on
+  Postgres (`value too long for type character varying(255)`), and SQLite had stored it
+  whole. Fixed:
+  - filenames are cut, keeping the extension;
+  - the worker id fits `locked_by`, since a long hostname would have failed every
+    claim;
+  - display names and profile names are validated when a processor is defined;
+  - `created_by` widened to fit the longest legal email plus `(ai draft)`.
+
+  `tests/test_column_limits.py` sends the longest realistic value down each path.
+- **The claim takes row locks.** On Postgres it is `SELECT … FOR UPDATE SKIP LOCKED`
+  then the UPDATE, in one transaction, so ten workers polling at once take ten different
+  jobs. The engine also checks pooled connections on checkout (`pool_pre_ping`),
+  because a worker keeps its pool for days and the database drops idle connections.
+
 ---
 
 ## 10. Reproducing the verification

@@ -10,7 +10,7 @@ from core.status import DocStatus, JobKind, JobStatus
 from ocr.base import UnsupportedMediaType
 from worker import run as worker
 
-from .conftest import TINY_PNG, FakeEngine, ForbiddenExtractor
+from .conftest import TINY_PNG, FakeEngine, ForbiddenExtractor, sqlite_only
 
 
 def _ingest(session, data=TINY_PNG, name="receipt.png"):
@@ -238,6 +238,7 @@ class TestRunOcrJobRetries:
 
 
 class TestRunOcrJobEdgeCases:
+    @sqlite_only
     def test_handles_a_missing_document_row(self, session, fake_engine):
         """
         The guard in run_ocr_job is defensive: the foreign key from jobs to
