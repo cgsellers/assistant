@@ -1255,6 +1255,37 @@ OCR layer looks identical from here and isn't exact. And the decision is per
 document: a PDF with some text pages and some scanned ones uses the text layer
 throughout.
 
+### 7.12 A required field forced the model to invent
+
+The first English invoice corpus is 20 synthetic invoices from FATURA (CC BY 4.0,
+one per template across 20 layouts). Several of those templates print no total at
+all. On them, the drafts came back with totals that appear nowhere on the page:
+1492.80, the line items summed; −460.50 and −1012.20, sums carrying a stray minus
+taken from a discount's `(-)`.
+
+The cause was in the type, not the model. `total` was declared `required: true`, and
+a required field is **non-nullable in the JSON schema**. Structured outputs then
+guarantee a number, so on a document with no total the model can't say so, and it
+computes one. The schema overrode the system prompt's own rule, *a null is correct
+and useful; a guess is not*.
+
+Absence was already somebody else's job. Both types carry a `required` *rule*, which
+fails validation with "total is required but was not extracted" and sends the document
+to review. So the field is now nullable and the rule does the enforcing: the no-total
+invoice returns `null` and goes to review visibly, and an invoice that prints its total
+still gets it. A test now fails if any shipped type marks a money field `required`.
+
+It was caught by a check worth keeping: **an amount the model returned that appears
+nowhere in the OCR text was computed, not read.** That check found four across the
+corpus, two of them on labels already verified by hand. An invented total that's
+arithmetically consistent with the line items looks exactly right on review, so
+plausibility is no defence; only the page is.
+
+The pattern is now three instances, each a different route to the same failure: a
+subtracted subtotal on an Italian receipt, two taxes summed into one `tax_amount`,
+and these totals. The descriptions say "never compute"; the model computes anyway
+when a field invites a value the page doesn't hold.
+
 ---
 
 ## 8. Known gaps and deferred work

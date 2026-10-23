@@ -70,9 +70,10 @@ fields:
       ("IVA 10%"). The amount, not the percentage. If several IVA rates are
       broken out, the sum of them.
 
+  # Nullable in the schema, enforced by the `required` rule -- see the
+  # comment on `total` in invoice.yaml for what forcing it caused.
   total:
     type: money
-    required: true
     description: >-
       The amount actually charged, labelled TOTAL, TOTAL A PAGAR or IMPORTE.
       Not SUBTOTAL, not BASE IMPONIBLE, and not the cash tendered or the

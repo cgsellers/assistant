@@ -657,7 +657,7 @@ class TestDraftingPastARoutingMiss:
         with pytest.raises(CorpusError, match="no active document type"):
             draft_labels(
                 seeded, unroutable, extractor=ForbiddenExtractor(),
-                engine=self._engine("x"), as_type="invoice",
+                engine=self._engine("x"), as_type="purchase_order",
             )
 
 

@@ -203,3 +203,75 @@ class TestSeededRoutingWorks:
 
     def test_an_unseeded_database_routes_nothing(self, session):
         assert registry.route(session, RECEIPT_TEXT) is None
+
+
+class TestTheInvoiceType:
+    """Two types registered means routing has to choose; these pin the choice."""
+
+    INVOICE_TEXT = (
+        "ACME SUPPLIES LTD\nINVOICE INV-2041\nDate: 14 March 2026\nDue Date: 13 April 2026\n"
+        "Bill To: Northwind Traders\nToner cartridge 89.99\nSubtotal 119.49\nVAT 20% 23.90\n"
+        "Total due 143.39"
+    )
+
+    @staticmethod
+    def _types():
+        return {d.name: d for d in seed.load_seeds()}
+
+    def test_an_english_invoice_routes_to_invoice_not_receipt(self):
+        types = self._types()
+        assert match_score(types["invoice"], self.INVOICE_TEXT) > 0
+        assert match_score(types["receipt"], self.INVOICE_TEXT) == 0.0
+
+    def test_a_spanish_receipt_routes_to_receipt_not_invoice(self):
+        types = self._types()
+        assert match_score(types["receipt"], RECEIPT_TEXT) > 0
+        assert match_score(types["invoice"], RECEIPT_TEXT) == 0.0
+
+    def test_total_alone_claims_nothing(self):
+        """`total` is on every financial document; it identifies none of them."""
+        assert match_score(self._types()["invoice"], "TOTAL 9.35") == 0.0
+
+    def test_a_good_extraction_passes_its_rules(self):
+        _, errors = validate(
+            self._types()["invoice"],
+            {"invoice_number": "INV-2041", "total": "143.39", "currency": "GBP",
+             "line_items": [{"description": "Toner", "quantity": 1, "unit_price": "89.99",
+                             "amount": None}]},
+        )
+        assert errors == []
+
+    def test_a_logo_only_seller_can_be_null(self):
+        _, errors = validate(self._types()["invoice"], {"total": "10.00", "vendor": None})
+        assert errors == []
+
+    def test_it_reaches_the_ledger(self):
+        from doctypes.canonical import to_ledger
+        from doctypes.validate import coerce
+
+        definition = self._types()["invoice"]
+        data, _ = coerce(definition, {"total": "143.39", "vendor": "ACME", "currency": "GBP"})
+        values, reason = to_ledger(definition, data)
+        assert reason is None
+        assert values["direction"] == "out"
+        assert values["counterparty"] == "ACME"
+
+
+def test_no_shipped_type_forces_a_document_level_amount():
+    """
+    A `required: true` field is non-nullable in the schema, so structured
+    outputs force an answer even when the document prints nothing -- and the
+    model computes one. Three FATURA invoices with no total line came back
+    with the line items summed, two of them with a stray minus sign. Absence
+    is the `required` rule's job: it sends the document to review instead.
+    """
+    from doctypes.definition import FieldType
+
+    for definition in seed.load_seeds():
+        forced = [
+            name
+            for name, spec in definition.fields.items()
+            if spec.type is FieldType.MONEY and spec.required
+        ]
+        assert forced == [], f"{definition.name}: {forced} would be invented when absent"
+        assert any(r.type == "required" and r.field == "total" for r in definition.rules)

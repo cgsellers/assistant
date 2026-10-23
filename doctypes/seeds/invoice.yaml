@@ -1,0 +1,158 @@
+# A supplier invoice, in English.
+#
+# Data, not configuration: loaded into `document_types` by
+# `python -m doctypes.seed`. Editing it and re-running the seed writes a new
+# version. The descriptions are the extraction instructions; name the label
+# a value sits next to rather than where it is on the page.
+
+name: invoice
+display_name: Invoice
+description: >-
+  A bill from a supplier: who is asking to be paid, how much, by when, and
+  for what. Written for English-language invoices, which mostly arrive as
+  PDFs exported from accounting software.
+
+matches:
+  # Two of these before a document is claimed as an invoice. "total" is
+  # deliberately absent: it appears on receipts, statements and delivery
+  # notes alike, and on its own it identifies nothing.
+  keywords:
+    - invoice
+    - bill to
+    - due date
+    - invoice number
+    - invoice no
+    - amount due
+    - payment terms
+    - subtotal
+  patterns:
+    - '\bINV[-/ ]?\d+'
+  min_score: 0.2
+
+fields:
+  invoice_number:
+    type: string
+    description: >-
+      The invoice's own reference, labelled Invoice No, Invoice #, Invoice
+      Number or Number. Not the purchase order number and not a customer or
+      account number.
+
+  issued_on:
+    type: date
+    description: >-
+      The invoice date, labelled Date, Invoice Date or Issue Date. Not the due
+      date and not a delivery or order date. Return it as YYYY-MM-DD.
+
+  due_date:
+    type: date
+    description: >-
+      When payment is due, labelled Due Date or Payment Due. Null if only
+      terms are printed (e.g. "Net 30") with no date.
+
+  po_number:
+    type: string
+    description: The purchase order number, labelled PO, PO Number or Order No. Null if absent.
+
+  vendor:
+    type: string
+    description: >-
+      The seller's business name as printed in text -- the company sending
+      the invoice, usually at the top beside or under the logo. Not the
+      customer in the Bill To block. Null if the seller is shown only as a
+      logo image with no name in text.
+
+  vendor_tax_id:
+    type: string
+    description: >-
+      The seller's tax or VAT registration number, labelled VAT No, Tax ID,
+      GSTIN, ABN or similar. The number only, without the label. Not the
+      customer's tax number.
+
+  bill_to:
+    type: string
+    description: >-
+      The customer's name from the Bill To or Invoice To block -- the first
+      line of that block, without the address beneath it.
+
+  currency:
+    type: string
+    choices: [USD, EUR, GBP, INR, CAD, AUD]
+    description: >-
+      The currency of the total, from the code or symbol printed with it ($
+      is USD unless another dollar is stated). If the line items and the total
+      show different currencies, use the total's. Null if nothing says.
+
+  subtotal:
+    type: money
+    description: >-
+      The amount before tax and discount, labelled Subtotal or Sub-total.
+      Null if not printed. Copy it; never compute it.
+
+  discount:
+    type: money
+    description: >-
+      The discount amount, labelled Discount, as a positive number. The
+      amount, not the percentage. Null if there is none.
+
+  tax_amount:
+    type: money
+    description: >-
+      The tax charged, labelled Tax, VAT, GST or Sales Tax. The amount, not
+      the rate. If several taxes are listed separately, their sum as printed
+      in a total tax line, otherwise null. Never compute it.
+
+  # Deliberately not `required: true`. A required field is non-nullable in the
+  # schema, so structured outputs force an answer even when the document has
+  # no total -- and the model then computes one. On a FATURA template with no
+  # total line it returned -1012.20 (subtotal + tax - discount, sign taken
+  # from the discount's "(-)"). Nullable here, enforced by the `required`
+  # rule below: a missing total goes to review instead of being invented.
+  total:
+    type: money
+    description: >-
+      The final amount of the invoice, labelled Total, Grand Total, Amount Due
+      or Balance Due. Not the subtotal and not an amount already paid.
+
+  line_items:
+    type: list
+    description: >-
+      One entry per product or service billed. Skip header rows, subtotal,
+      tax, discount and total lines.
+    item_fields:
+      description:
+        type: string
+        required: true
+        description: The item or service as printed in the description column.
+      quantity:
+        type: number
+        description: The quantity or hours, if a column shows it.
+      unit_price:
+        type: money
+        description: >-
+          The price per unit, from a column labelled Price, Unit Price or Rate.
+      amount:
+        type: money
+        description: >-
+          The line total, from a column labelled Amount, Total or Line Total.
+          Null if the invoice prints only a unit price -- never multiply it out.
+
+rules:
+  # Conservative, for the reason in receipt.yaml: a rule that misfires on a
+  # good extraction costs more than it saves. No sum rules yet -- the first
+  # corpus is synthetic and its own totals do not always reconcile.
+  - type: required
+    field: total
+  - type: positive
+    field: total
+    message: an invoice total should be positive; a refund belongs to a credit note
+
+canonical:
+  direction: out          # a supplier's invoice: money leaving
+  amount: total
+  tax_amount: tax_amount
+  occurred_on: issued_on
+  counterparty: vendor
+  counterparty_tax_id: vendor_tax_id
+  currency: currency
+
+profiles: {}
