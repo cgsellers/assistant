@@ -261,3 +261,68 @@ class TestRecordingIt:
 
     def test_a_document_with_no_row_returns_none(self, session, extraction):
         assert repository.current_transaction(session, extraction.document_id) is None
+
+
+class TestTaxLines:
+    """
+    An invoice can print GST and VAT separately with no combined line. The
+    model records each as printed; the ledger's tax is their sum, added here
+    in code, because the model is told never to add anything up.
+    """
+
+    @staticmethod
+    def _invoice():
+        from doctypes import seed
+
+        return next(d for d in seed.load_seeds() if d.name == "invoice")
+
+    def _ledger(self, **data):
+        from doctypes.validate import coerce
+
+        coerced, _ = coerce(self._invoice(), {"total": "491.67", **data})
+        return to_ledger(self._invoice(), coerced)[0]
+
+    def test_separate_taxes_are_summed_in_code(self):
+        values = self._ledger(taxes=[
+            {"name": "GST", "rate": "18%", "amount": "89.03"},
+            {"name": "VAT", "rate": "3.39%", "amount": "16.76"},
+        ])
+        assert values["tax_amount"] == Decimal("105.79")
+
+    def test_a_printed_total_tax_wins_over_the_list(self):
+        values = self._ledger(tax_amount="100.00", taxes=[{"name": "VAT", "amount": "16.76"}])
+        assert values["tax_amount"] == Decimal("100.00")
+
+    def test_one_unreadable_line_makes_the_total_unknown_not_smaller(self):
+        values = self._ledger(taxes=[
+            {"name": "GST", "amount": "89.03"},
+            {"name": "VAT", "amount": "n/a"},
+        ])
+        assert values["tax_amount"] is None
+
+    def test_no_taxes_means_no_tax(self):
+        assert self._ledger(taxes=None)["tax_amount"] is None
+
+    def test_tax_lines_must_point_at_a_list_with_amounts(self):
+        with pytest.raises(ValidationError, match="must point at a list"):
+            _definition({"direction": "out", "amount": "total", "tax_lines": "vendor"})
+
+
+class TestSeedingDoesNotChurnVersions:
+    def test_a_new_optional_format_field_is_not_a_content_change(self, session):
+        """
+        Adding canonical.tax_lines to the format once re-versioned the receipt
+        type although receipt.yaml had not changed: stored JSON lacked the new
+        default. Comparing through the model fills it in on both sides.
+        """
+        from doctypes import seed
+
+        definitions = seed.load_seeds()
+        seed.sync(session, definitions)
+        row = repository.get_active_document_type(session, "receipt")
+        stale = dict(row.definition)
+        stale["canonical"] = {k: v for k, v in stale["canonical"].items() if k != "tax_lines"}
+        row.definition = stale
+        session.commit()
+
+        assert seed.sync(session, definitions)["receipt"].startswith("unchanged")

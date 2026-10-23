@@ -375,7 +375,7 @@ Lint and tests:
 
 ```bash
 uv run ruff check .
-uv run pytest              # 724 tests, ~5s; no container, tesseract, network or API key
+uv run pytest              # 742 tests, ~5s; no container, tesseract, network or API key
 ```
 
 Measuring extraction against a labelled corpus:

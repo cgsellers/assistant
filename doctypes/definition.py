@@ -23,6 +23,15 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+#: Structured outputs refuse a schema with more than this many union-typed
+#: parameters ("Schemas contains too many parameters with union types ...
+#: limit: 16 parameters with unions"). Every optional field is one -- it is
+#: rendered as `anyOf: [T, null]` -- so this caps the optional fields a type
+#: can have. Checked when a definition is built, because the alternative is
+#: an analyst authoring a type that looks fine and then has every single
+#: document rejected by the API.
+MAX_NULLABLE_FIELDS = 16
+
 # Field names become JSON keys and eventually column names, so keep them
 # conservative rather than discovering the hard way what breaks.
 FIELD_NAME = re.compile(r"^[a-z][a-z0-9_]{0,48}$")
@@ -255,6 +264,11 @@ class CanonicalMap(BaseModel):
     counterparty: str | None = None
     counterparty_tax_id: str | None = None
     tax_amount: str | None = None
+    #: A list field of individual taxes, each with an `amount`. Used when
+    #: `tax_amount` came back null -- a document listing GST and VAT separately
+    #: with no combined line. The ledger's tax is then their sum, computed here
+    #: in code, so the model never has to add them up itself.
+    tax_lines: str | None = None
     currency: str | None = None
 
     def referenced(self) -> dict[str, str]:
@@ -267,6 +281,7 @@ class CanonicalMap(BaseModel):
                 ("counterparty", self.counterparty),
                 ("counterparty_tax_id", self.counterparty_tax_id),
                 ("tax_amount", self.tax_amount),
+                ("tax_lines", self.tax_lines),
                 ("currency", self.currency),
             )
             if field is not None
@@ -339,6 +354,15 @@ class Definition(BaseModel):
                     f"profile {key!r} overrides unknown field(s): {sorted(unknown)}"
                 )
 
+        nullable = _count_nullable(self.fields)
+        if nullable > MAX_NULLABLE_FIELDS:
+            raise ValueError(
+                f"{nullable} optional fields, but structured outputs accept at most "
+                f"{MAX_NULLABLE_FIELDS}: each optional field is a nullable union in the "
+                "schema. Mark fields that are always present when their parent exists "
+                "as required (e.g. a tax line's amount), or split the type."
+            )
+
         if self.canonical is not None:
             # The canonical layer is typed where the raw layer is not, so a
             # mapping that points at the wrong kind of field would fail at
@@ -347,6 +371,7 @@ class Definition(BaseModel):
                 "amount": FieldType.MONEY,
                 "tax_amount": FieldType.MONEY,
                 "occurred_on": FieldType.DATE,
+                "tax_lines": FieldType.LIST,
             }
             for column, name in self.canonical.referenced().items():
                 if name not in known:
@@ -359,5 +384,29 @@ class Definition(BaseModel):
                         f"canonical.{column} must point at a {wanted} field, but "
                         f"{name!r} is {self.fields[name].type}"
                     )
+            if self.canonical.tax_lines:
+                items = self.fields[self.canonical.tax_lines].item_fields or {}
+                if items.get("amount") is None or items["amount"].type is not FieldType.MONEY:
+                    raise ValueError(
+                        "canonical.tax_lines must point at a list whose entries "
+                        "have a money field called `amount`"
+                    )
 
         return self
+
+
+def _count_nullable(fields: dict[str, FieldSpec]) -> int:
+    """
+    How many union-typed parameters this field set becomes in the schema.
+
+    Mirrors doctypes.schema._property_schema: a field is nullable unless it is
+    required or a list, at every level. A test checks this count against the
+    real schema, so the two cannot drift apart.
+    """
+    count = 0
+    for spec in fields.values():
+        if spec.type is FieldType.LIST:
+            count += _count_nullable(spec.item_fields or {})
+        elif not spec.required:
+            count += 1
+    return count

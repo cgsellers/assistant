@@ -696,7 +696,7 @@ not currently in scope.
 Python 3.12.14 · FastAPI 0.141.1 · SQLAlchemy 2.0.52 · Pydantic 2.13.5 · Alembic 1.20.0
 anthropic 1.5.0
 Migration 6823df7fd6b2 (head, applied) · alembic check: no drift · ruff: clean
-pytest: 703 passed in 4.5s
+pytest: 742 passed in 5.1s
 ```
 
 ### 7.4 Phase 1 checklist
@@ -1285,6 +1285,37 @@ The pattern is now three instances, each a different route to the same failure: 
 subtracted subtotal on an Italian receipt, two taxes summed into one `tax_amount`,
 and these totals. The descriptions say "never compute"; the model computes anyway
 when a field invites a value the page doesn't hold.
+
+### 7.13 Several taxes: the model reads them, code adds them
+
+An invoice can print GST and VAT as separate lines with no combined tax figure. A
+single `tax_amount` field left two bad options: compute the sum, which the model did
+unprompted (105.79 = 89.03 + 16.76), or record null and lose the tax entirely.
+
+The invoice type now has a `taxes` list, one entry per printed tax line with its
+name, rate and amount, all copied rather than computed. `tax_amount` is reserved for
+a total that's actually printed. A new `canonical.tax_lines` lets the ledger sum the
+list **in code** when no total is printed, so the ledger still has the right tax
+and the model never adds anything up. If any line's amount is unreadable, the sum is
+null rather than smaller. Tax shown only as a per-item column, which appears on two
+FATURA templates, isn't captured yet.
+
+Adding the list exposed a hard API limit: **structured outputs accept at most 16
+union-typed parameters per schema**, and every optional field is a nullable union.
+The invoice reached 18 and the API rejected every request, so no invoice would have
+been extracted at all. The cap is now checked when a definition is built, with a
+message saying how to fix it, so a type authored through the UI can't pass
+validation and then fail on every document. Inside the list, a tax line's name and
+amount are required, because a line that exists always prints both; only `rate` is
+optional. That puts the invoice at exactly 16: it can't gain another optional field
+without making one required or splitting the type.
+
+Two seeding bugs surfaced along the way. Adding an optional field to the definition
+*format* made every stored type look changed, because stored JSON lacked the new
+default, and versioned the unchanged receipt type. Definitions are now compared
+after both pass through the model. And a stricter rule can make a stored definition
+invalid: the registry skips it, so the type stops routing, and the seed must replace
+it rather than crash trying to compare against it.
 
 ---
 

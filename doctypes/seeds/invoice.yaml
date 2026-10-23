@@ -97,9 +97,36 @@ fields:
   tax_amount:
     type: money
     description: >-
-      The tax charged, labelled Tax, VAT, GST or Sales Tax. The amount, not
-      the rate. If several taxes are listed separately, their sum as printed
-      in a total tax line, otherwise null. Never compute it.
+      The total tax as one printed figure, labelled Tax, VAT, GST, Sales Tax
+      or Total Tax. If the invoice lists more than one tax and prints no
+      combined tax line, null -- each tax goes in `taxes` instead. The amount,
+      not the rate. Never add taxes together.
+
+  # Every tax as printed, so an invoice charging GST and VAT separately loses
+  # nothing and nobody adds them up but code. The ledger's tax is their sum
+  # when no single total is printed -- see canonical.tax_lines below.
+  taxes:
+    type: list
+    description: >-
+      One entry per tax line printed on the invoice -- VAT, GST, sales tax,
+      state tax and so on. Include a tax even when it is the only one. Skip
+      tax registration numbers (GSTIN, VAT No): those are identifiers, not
+      charges.
+    # name and amount are required: a tax line that exists always prints
+    # both, so this forces nothing that is not on the page -- and the schema
+    # has a hard cap of 16 nullable fields (see MAX_NULLABLE_FIELDS).
+    item_fields:
+      name:
+        type: string
+        required: true
+        description: The tax's name as printed, e.g. VAT, GST, Sales Tax.
+      rate:
+        type: string
+        description: The rate as printed, with its percent sign, e.g. 18%. Null if not shown.
+      amount:
+        type: money
+        required: true
+        description: The amount of this tax as printed. Never compute it from the rate.
 
   # Deliberately not `required: true`. A required field is non-nullable in the
   # schema, so structured outputs force an answer even when the document has
@@ -150,6 +177,7 @@ canonical:
   direction: out          # a supplier's invoice: money leaving
   amount: total
   tax_amount: tax_amount
+  tax_lines: taxes        # summed in code when no single tax total is printed
   occurred_on: issued_on
   counterparty: vendor
   counterparty_tax_id: vendor_tax_id

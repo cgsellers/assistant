@@ -275,3 +275,70 @@ def test_no_shipped_type_forces_a_document_level_amount():
         ]
         assert forced == [], f"{definition.name}: {forced} would be invented when absent"
         assert any(r.type == "required" and r.field == "total" for r in definition.rules)
+
+
+class TestTheNullableFieldCap:
+    """
+    Structured outputs refuse a schema with more than 16 union-typed
+    parameters. The invoice type reached 18 when `taxes` was added, and the
+    API rejected every request; this is now caught when a type is defined.
+    """
+
+    def test_the_counter_matches_the_real_schema(self):
+        import json
+
+        from doctypes.definition import _count_nullable
+        from doctypes.schema import build_json_schema
+
+        for d in seed.load_seeds():
+            assert _count_nullable(d.fields) == json.dumps(build_json_schema(d)).count("anyOf")
+
+    def test_every_shipped_type_is_within_the_cap(self):
+        from doctypes.definition import MAX_NULLABLE_FIELDS, _count_nullable
+
+        for d in seed.load_seeds():
+            assert _count_nullable(d.fields) <= MAX_NULLABLE_FIELDS, d.name
+
+    def test_a_type_over_the_cap_is_refused_when_defined(self):
+        from pydantic import ValidationError
+
+        fields = {f"f{i}": {"type": "string", "description": "x"} for i in range(17)}
+        with pytest.raises(ValidationError, match="at most 16"):
+            Definition.model_validate(
+                {"name": "wide", "matches": {"keywords": ["x"]}, "fields": fields}
+            )
+
+    def test_required_and_list_fields_do_not_count(self):
+        from doctypes.definition import _count_nullable
+
+        fields = Definition.model_validate({
+            "name": "t", "matches": {"keywords": ["x"]},
+            "fields": {
+                "a": {"type": "string", "description": "x", "required": True},
+                "items": {"type": "list", "description": "x", "item_fields": {
+                    "b": {"type": "string", "description": "x"},
+                    "c": {"type": "string", "description": "x", "required": True},
+                }},
+            },
+        }).fields
+        assert _count_nullable(fields) == 1
+
+
+def test_a_stored_definition_that_breaks_a_new_rule_is_superseded(session):
+    """
+    Raising the bar on definitions can make a stored one invalid. The registry
+    skips it, so the type stops routing; the seed must replace it, not crash.
+    """
+    seed.sync(session, seed.load_seeds())
+    row = repository.get_active_document_type(session, "invoice")
+    broken = dict(row.definition)
+    broken["fields"] = {
+        **broken["fields"],
+        **{f"extra{i}": {"type": "string", "description": "x"} for i in range(5)},
+    }
+    row.definition = broken
+    session.commit()
+
+    actions = seed.sync(session, seed.load_seeds())
+
+    assert actions["invoice"].startswith("updated")

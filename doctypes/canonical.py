@@ -63,6 +63,9 @@ def to_ledger(definition: Definition, data: dict) -> tuple[dict | None, str | No
         tax = data.get(mapping.tax_amount)
         values["tax_amount"] = tax if isinstance(tax, Decimal) else None
 
+    if values.get("tax_amount") is None and mapping.tax_lines:
+        values["tax_amount"] = _sum_taxes(data.get(mapping.tax_lines))
+
     if mapping.occurred_on:
         occurred = data.get(mapping.occurred_on)
         values["occurred_on"] = occurred if isinstance(occurred, date) else None
@@ -79,6 +82,20 @@ def to_ledger(definition: Definition, data: dict) -> tuple[dict | None, str | No
         values["currency"] = _currency(data.get(mapping.currency))
 
     return values, None
+
+
+def _sum_taxes(lines: Any) -> Decimal | None:
+    """
+    The total of separately printed taxes -- added here, in code, because the
+    model is told never to add anything up. All or nothing: if any line's
+    amount is unreadable the total is unknown, not smaller, so it is null.
+    """
+    if not isinstance(lines, list) or not lines:
+        return None
+    amounts = [line.get("amount") if isinstance(line, dict) else None for line in lines]
+    if not all(isinstance(a, Decimal) for a in amounts):
+        return None
+    return sum(amounts, Decimal("0"))
 
 
 def _text(value: Any, *, limit: int) -> str | None:

@@ -21,6 +21,7 @@ import logging
 from pathlib import Path
 
 import yaml
+from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from core import repository
@@ -72,11 +73,22 @@ def sync(session: Session, definitions: list[Definition]) -> dict[str, str]:
             # Compare at the stored version number: the seed file does not
             # carry one worth trusting, and a version bump alone is not a
             # content change.
-            same = (
-                definition.model_copy(update={"version": active.version}).model_dump(
-                    mode="json"
-                )
-                == active.definition
+            # Both sides through the same model, so a field added to the
+            # definition *format* -- with a default -- does not read as a change
+            # to every stored type. Comparing raw JSON did exactly that: adding
+            # `canonical.tax_lines` versioned the receipt type, which had not
+            # changed at all.
+            try:
+                stored = Definition.model_validate(active.definition)
+            except ValidationError:
+                # The stored version breaks a rule added since it was written --
+                # e.g. the cap on nullable fields. The registry already skips it,
+                # so the type is not routing at all until a valid version lands;
+                # treating it as changed is what gets one written.
+                stored = None
+            same = stored is not None and (
+                definition.model_copy(update={"version": active.version})
+                == stored.model_copy(update={"version": active.version})
             )
             if same:
                 actions[definition.name] = f"unchanged (v{active.version})"
