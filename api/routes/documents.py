@@ -10,7 +10,8 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, Up
 from sqlalchemy.orm import Session
 
 from api.schemas import Base64Upload, DocumentDetail, DocumentOut, OcrResultOut, ResultOut
-from core import repository, storage
+from core import repository, storage, tenancy
+from core.auth import Principal, require_principal
 from core.config import get_settings
 from core.db import get_session
 from doctypes.results import document_result
@@ -47,10 +48,26 @@ def check_upload(data: bytes) -> str:
     return mime
 
 
-def _ingest(session: Session, data: bytes, filename: str | None) -> DocumentOut:
+def owner(
+    principal: Principal | None = Depends(require_principal),
+    session: Session = Depends(get_session),
+) -> str:
+    """
+    The organisation an upload belongs to: the caller's. With auth switched
+    off for local work there is no caller, so it is the team's own.
+    """
+    if principal is not None and principal.organisation_id is not None:
+        return principal.organisation_id
+    return tenancy.demo_organisation(session).id
+
+
+def _ingest(
+    session: Session, organisation_id: str, data: bytes, filename: str | None
+) -> DocumentOut:
     mime = check_upload(data)
     document, created = repository.ingest(
-        session, data=data, mime_type=mime, original_filename=filename
+        session, organisation_id=organisation_id, data=data, mime_type=mime,
+        original_filename=filename,
     )
     out = DocumentOut.model_validate(document)
     out.duplicate = not created
@@ -61,21 +78,23 @@ def _ingest(session: Session, data: bytes, filename: str | None) -> DocumentOut:
 def upload(
     file: UploadFile = File(description="Receipt or invoice: JPEG, PNG, WebP, HEIC, TIFF or PDF"),
     session: Session = Depends(get_session),
+    organisation_id: str = Depends(owner),
 ) -> DocumentOut:
     """
-    Upload a file for processing.
+    Upload a file for processing. It belongs to the caller's organisation.
 
-    Deduplicated by SHA-256 of the contents: uploading the same bytes twice
-    returns the original document with `duplicate: true` and queues no extra
-    work. Safe to retry.
+    Deduplicated by SHA-256 of the contents, per organisation: uploading the
+    same bytes twice returns the original document with `duplicate: true` and
+    queues no extra work. Safe to retry.
     """
-    return _ingest(session, file.file.read(), file.filename)
+    return _ingest(session, organisation_id, file.file.read(), file.filename)
 
 
 @router.post("/base64", response_model=DocumentOut, summary="Upload as base64 JSON")
 def upload_base64(
     payload: Base64Upload,
     session: Session = Depends(get_session),
+    organisation_id: str = Depends(owner),
 ) -> DocumentOut:
     """Same as `POST /documents`, for callers that already hold the bytes."""
     try:
@@ -84,7 +103,7 @@ def upload_base64(
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST, f"content_b64 is not valid base64: {exc}"
         ) from exc
-    return _ingest(session, data, payload.filename)
+    return _ingest(session, organisation_id, data, payload.filename)
 
 
 @router.get(

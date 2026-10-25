@@ -115,6 +115,13 @@ def session(session_factory) -> Iterator[Session]:
         yield s
 
 
+def demo_org_id(session) -> str:
+    """The team's organisation, which most tests' documents, keys and users belong to."""
+    from core import tenancy
+
+    return tenancy.demo_organisation(session).id
+
+
 @pytest.fixture
 def api_key(session_factory) -> str:
     """
@@ -126,7 +133,7 @@ def api_key(session_factory) -> str:
     from core import auth
 
     with session_factory() as s:
-        _, secret = auth.create(s, "test suite", role="admin")
+        _, secret = auth.create(s, "test suite", role="admin", organisation_id=demo_org_id(s))
     return secret
 
 

@@ -72,8 +72,20 @@ def hash_password(password: str) -> str:
 
 
 def create(
-    session: Session, email: str, password: str, *, role: str = "author", name: str | None = None
+    session: Session,
+    email: str,
+    password: str,
+    *,
+    organisation_id: str,
+    is_staff: bool,
+    role: str = "author",
+    name: str | None = None,
 ) -> User:
+    """
+    Both decided by the caller, never defaulted here: which organisation a
+    person belongs to, and whether they are staff -- who can see every
+    organisation's documents -- are not things to get by accident.
+    """
     if role not in ROLES:
         raise ValueError(f"role must be one of {ROLES}")
     email = _normalise(email)
@@ -85,7 +97,10 @@ def create(
         raise ValueError("a name is at most 200 characters")
     if session.scalar(select(User).where(User.email == email)) is not None:
         raise ValueError(f"{email} already has an account")
-    user = User(email=email, name=name, role=role, password_hash=hash_password(password))
+    user = User(
+        email=email, name=name, role=role, password_hash=hash_password(password),
+        organisation_id=organisation_id, is_staff=is_staff,
+    )
     session.add(user)
     session.commit()
     return user
@@ -214,6 +229,11 @@ def main() -> None:
     made.add_argument("email")
     made.add_argument("--name")
     made.add_argument("--role", choices=ROLES, default="author")
+    made.add_argument(
+        "--client", metavar="SLUG",
+        help="a client organisation's user, who sees only its documents; "
+        "without it, a Ledgerline team member (staff), who sees all of them",
+    )
     sub.add_parser("list", help="show users")
     off = sub.add_parser("disable", help="stop a user signing in and end their sessions")
     off.add_argument("email")
@@ -232,8 +252,22 @@ def main() -> None:
                 raise SystemExit("the two passwords differ")
             try:
                 if args.command == "create":
-                    user = create(session, args.email, password, role=args.role, name=args.name)
-                    log.info("created %s (%s)", user.email, user.role)
+                    from core import tenancy
+
+                    organisation = (
+                        tenancy.by_slug(session, args.client) if args.client
+                        else tenancy.demo_organisation(session)
+                    )
+                    if organisation is None:
+                        raise SystemExit(f"no organisation called {args.client!r}")
+                    user = create(
+                        session, args.email, password, role=args.role, name=args.name,
+                        organisation_id=organisation.id, is_staff=args.client is None,
+                    )
+                    kind = "client user" if args.client else "staff"
+                    log.info(
+                        "created %s (%s, %s, %s)", user.email, user.role, kind, organisation.name
+                    )
                 else:
                     user = set_password(session, args.email, password)
                     if user is None:

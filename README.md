@@ -426,10 +426,15 @@ cp .env.example .env               # ANTHROPIC_API_KEY is only needed from phase
 uv run alembic upgrade head        # creates ./data/ledgerline.db
 uv run python -m doctypes.seed     # creates the starter processors; never overwrites panel edits
 uv run python -m core.auth create "local" --role admin   # prints a key, once
-uv run python -m core.users create you@example.com --role admin   # a panel login
+uv run python -m core.users create you@example.com --role admin   # a panel login (team staff)
 uv run uvicorn api.main:app --reload
 # docs at http://127.0.0.1:8000/docs, the panel at /panel, health check at /health
 ```
+
+Clients are organisations: `uv run python -m core.tenancy create "Acme Ltd" acme`, then
+`--client acme` on the two commands above for that client's user or ERP key. Without it,
+users are the Ledgerline team (staff, who see every organisation) and keys belong to the
+team's own organisation, "Ledgerline demo".
 
 The panel's session cookie is `Secure`, so it is only sent over https. Chrome and Firefox
 make an exception for `localhost`; Safari may not, which looks like signing in and landing

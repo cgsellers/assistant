@@ -17,7 +17,7 @@ from ocr.base import OcrError
 from ocr.layout import to_rows
 from ocr.pdftext import MIN_CHARS, TextLayerFirst, read_text_layer
 
-from .conftest import FakeEngine
+from .conftest import FakeEngine, demo_org_id
 from .pdfs import INVOICE, make_pdf
 
 
@@ -130,7 +130,9 @@ class TestThroughThePipeline:
         from worker import run as worker
 
         document, _ = repository.ingest(
-            session, data=make_pdf(INVOICE), mime_type="application/pdf",
+            session,
+            organisation_id=demo_org_id(session),
+            data=make_pdf(INVOICE), mime_type="application/pdf",
             original_filename="inv.pdf",
         )
         worker.run_ocr_job(

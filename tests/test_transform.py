@@ -23,7 +23,7 @@ from doctypes.canonical import derived_columns
 from doctypes.definition import Definition, Transform
 from doctypes.transform import TransformError, check_examples, process, run
 
-from .conftest import TINY_PNG, FakeExtractor
+from .conftest import TINY_PNG, FakeExtractor, demo_org_id
 
 DOUBLE = (
     "from decimal import Decimal\n\n"
@@ -260,7 +260,9 @@ class TestInTheWorker:
 
         seed.sync(session, seed.load_seeds())
         document, _ = repository.ingest(
-            session, data=TINY_PNG, mime_type="image/png", original_filename="i.png"
+            session,
+            organisation_id=demo_org_id(session),
+            data=TINY_PNG, mime_type="image/png", original_filename="i.png"
         )
         document.status = DocStatus.OCR_DONE
         session.add(OcrResult(

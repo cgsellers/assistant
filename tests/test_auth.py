@@ -17,7 +17,7 @@ from core import auth
 from core.config import get_settings
 from core.models import ApiKey
 
-from .conftest import TINY_PNG
+from .conftest import TINY_PNG, demo_org_id
 
 
 def _upload(client: TestClient):
@@ -34,7 +34,7 @@ class TestTheDoorIsShut:
 
     def test_a_revoked_key_is_refused(self, _wired, session_factory):
         with session_factory() as s:
-            row, secret = auth.create(s, "temporary")
+            row, secret = auth.create(s, "temporary", organisation_id=demo_org_id(s))
             auth.revoke(s, row.prefix)
 
         with TestClient(app, headers={"Authorization": f"Bearer {secret}"}) as c:
@@ -59,7 +59,7 @@ class TestTheDoorIsShut:
         and tells a legitimate caller nothing "check your key" does not.
         """
         with session_factory() as s:
-            row, revoked = auth.create(s, "temporary")
+            row, revoked = auth.create(s, "temporary", organisation_id=demo_org_id(s))
             auth.revoke(s, row.prefix)
 
         bodies = {_upload(anon_client).json()["detail"]}
@@ -136,7 +136,7 @@ class TestANewRouteIsProtectedByDefault:
 class TestStorage:
     def test_the_secret_is_never_stored(self, session_factory):
         with session_factory() as s:
-            _, secret = auth.create(s, "k")
+            _, secret = auth.create(s, "k", organisation_id=demo_org_id(s))
             rows = s.scalars(select(ApiKey)).all()
 
         stored = " ".join(f"{r.key_hash} {r.prefix} {r.name}" for r in rows)
@@ -144,7 +144,7 @@ class TestStorage:
 
     def test_only_a_prefix_is_recoverable(self, session_factory):
         with session_factory() as s:
-            row, secret = auth.create(s, "k")
+            row, secret = auth.create(s, "k", organisation_id=demo_org_id(s))
 
         assert secret.startswith(row.prefix)
         assert len(row.prefix) < len(secret)
@@ -184,7 +184,7 @@ class TestLifecycle:
 
     def test_revoking_is_idempotent(self, session_factory):
         with session_factory() as s:
-            row, _ = auth.create(s, "k")
+            row, _ = auth.create(s, "k", organisation_id=demo_org_id(s))
             auth.revoke(s, row.prefix)
             first = s.scalars(select(ApiKey)).one().revoked_at
             auth.revoke(s, row.prefix)
@@ -194,7 +194,7 @@ class TestLifecycle:
     def test_revoking_keeps_the_row(self, session_factory):
         """So "what was this key doing before we killed it" stays answerable."""
         with session_factory() as s:
-            row, _ = auth.create(s, "k")
+            row, _ = auth.create(s, "k", organisation_id=demo_org_id(s))
             auth.revoke(s, row.prefix)
 
             assert s.scalars(select(ApiKey)).one().id == row.id
@@ -227,7 +227,7 @@ class TestAuthenticateDirectly:
         assert auth.authenticate(session, None) is None
 
     def test_a_good_key_returns_its_row(self, session):
-        row, secret = auth.create(session, "k")
+        row, secret = auth.create(session, "k", organisation_id=demo_org_id(session))
         assert auth.authenticate(session, secret).id == row.id
 
 

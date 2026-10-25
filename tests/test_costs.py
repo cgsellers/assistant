@@ -17,7 +17,7 @@ from core.costs import cost_report, format_report
 from core.models import Extraction, utcnow
 from llm.base import ExtractionResult
 
-from .conftest import TINY_PNG
+from .conftest import TINY_PNG, demo_org_id
 
 
 @pytest.fixture
@@ -29,6 +29,7 @@ def spend(session):
         if name not in documents:
             document, _ = repository.ingest(
                 session,
+                organisation_id=demo_org_id(session),
                 data=TINY_PNG + name.encode(),
                 mime_type="image/png",
                 original_filename=f"{name}.png",
@@ -197,7 +198,9 @@ class TestEndpoint:
     def test_it_reports(self, client, session_factory):
         with session_factory() as s:
             document, _ = repository.ingest(
-                s, data=TINY_PNG, mime_type="image/png", original_filename="a.png"
+                s,
+                organisation_id=demo_org_id(s),
+                data=TINY_PNG, mime_type="image/png", original_filename="a.png"
             )
             repository.record_extraction(
                 s,

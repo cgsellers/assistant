@@ -19,7 +19,7 @@ from doctypes import registry
 from llm.base import ExtractionError, ExtractionRefused
 from worker import run as worker
 
-from .conftest import TINY_PNG, FakeExtractor, receipt_definition, sqlite_only
+from .conftest import TINY_PNG, FakeExtractor, demo_org_id, receipt_definition, sqlite_only
 
 OCR_TEXT = "CAFE LUNA\nTOTAL\n9.35"
 
@@ -37,7 +37,9 @@ def ready(session):
 
     def _make(text: str = OCR_TEXT, *, with_ocr: bool = True):
         document, _ = repository.ingest(
-            session, data=TINY_PNG, mime_type="image/png", original_filename="a.png"
+            session,
+            organisation_id=demo_org_id(session),
+            data=TINY_PNG, mime_type="image/png", original_filename="a.png"
         )
         document.status = DocStatus.OCR_DONE
         if with_ocr:

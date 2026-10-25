@@ -30,6 +30,9 @@ class MeOut(BaseModel):
     kind: str
     name: str
     role: str
+    organisation_id: str | None = None
+    #: The Ledgerline team, which sees every organisation's documents.
+    is_staff: bool = False
     #: Only for a signed-in browser: what to send in the CSRF header.
     csrf_token: str | None = None
     csrf_header: str = CSRF_HEADER
@@ -68,6 +71,8 @@ def login(body: SignInIn, response: Response, session: Session = Depends(get_ses
         kind="user",
         name=signed_in.user.email,
         role=signed_in.user.role,
+        organisation_id=signed_in.user.organisation_id,
+        is_staff=signed_in.user.is_staff,
         csrf_token=signed_in.session.csrf_token,
     )
 
@@ -88,5 +93,7 @@ def me(request: Request, principal: Principal | None = Depends(require_principal
         kind=principal.kind,
         name=principal.name,
         role=principal.role,
+        organisation_id=principal.organisation_id,
+        is_staff=principal.is_staff,
         csrf_token=signed_in.csrf_token if signed_in is not None else None,
     )

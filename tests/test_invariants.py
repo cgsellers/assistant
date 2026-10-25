@@ -16,13 +16,15 @@ from sqlalchemy.exc import IntegrityError
 from core import repository
 from core.models import DocumentTypeDefinition, Extraction, Transaction
 
-from .conftest import TINY_PNG, receipt_definition
+from .conftest import TINY_PNG, demo_org_id, receipt_definition
 
 
 @pytest.fixture
 def extraction(session):
     document, _ = repository.ingest(
-        session, data=TINY_PNG, mime_type="image/png", original_filename="a.png"
+        session,
+        organisation_id=demo_org_id(session),
+        data=TINY_PNG, mime_type="image/png", original_filename="a.png"
     )
     return repository.record_extraction(
         session, document_id=document.id, doc_type="receipt", schema_version=1,

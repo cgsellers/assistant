@@ -18,6 +18,8 @@ from api.main import app
 from core import auth, users
 from core.models import User, UserSession, utcnow
 
+from .conftest import demo_org_id
+
 PASSWORD = "correct horse battery"
 
 
@@ -28,7 +30,9 @@ pytestmark = pytest.mark.usefixtures("fast_hashing")
 def make_user(session_factory):
     def _make(email="ana@example.com", role="author", password=PASSWORD):
         with session_factory() as s:
-            return users.create(s, email, password, role=role)
+            return users.create(
+                s, email, password, role=role, organisation_id=demo_org_id(s), is_staff=True,
+            )
 
     return _make
 
@@ -66,16 +70,24 @@ class TestPasswords:
 
     def test_a_short_password_is_refused(self, session):
         with pytest.raises(ValueError, match="at least 12"):
-            users.create(session, "a@x.com", "short")
+            users.create(
+                session, "a@x.com", "short", organisation_id=demo_org_id(session), is_staff=True,
+            )
 
     def test_emails_are_one_person_whatever_their_case(self, session, make_user):
         make_user("Ana@Example.com")
         with pytest.raises(ValueError, match="already has an account"):
-            users.create(session, "ana@example.com", PASSWORD)
+            users.create(
+                session, "ana@example.com", PASSWORD, organisation_id=demo_org_id(session),
+                is_staff=True,
+            )
 
     def test_an_unknown_role_is_refused(self, session):
         with pytest.raises(ValueError, match="role"):
-            users.create(session, "a@x.com", PASSWORD, role="owner")
+            users.create(
+                session, "a@x.com", PASSWORD, role="owner", organisation_id=demo_org_id(session),
+                is_staff=True,
+            )
 
 
 class TestSigningIn:
@@ -239,7 +251,9 @@ class TestRoles:
 
     def test_keys_have_roles_too(self, _wired, session_factory):
         with session_factory() as s:
-            _, secret = auth.create(s, "drafting agent")  # author by default
+            _, secret = auth.create(  # author by default
+                s, "drafting agent", organisation_id=demo_org_id(s),
+            )
         with TestClient(app, headers={"Authorization": f"Bearer {secret}"}) as c:
             c.post("/processors", json={"definition": SPEC})
             assert c.post("/processors/till/versions/1/publish").status_code == 403

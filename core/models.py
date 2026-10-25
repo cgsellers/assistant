@@ -29,10 +29,11 @@ from sqlalchemy import (
     Text,
     TypeDecorator,
     UniqueConstraint,
+    event,
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship
 
 from core.money import normalise
 from core.status import DocStatus, JobStatus
@@ -141,14 +142,40 @@ class Base(DeclarativeBase):
     metadata = MetaData(naming_convention=NAMING_CONVENTION)
 
 
+class Organisation(Base):
+    """
+    A client company -- or the Ledgerline team's own, "Ledgerline demo".
+
+    Tenancy (DESIGN §9.3): every document belongs to exactly one organisation,
+    and so does everything made from it -- OCR, events, jobs, extractions,
+    ledger rows. Users and API keys belong to one too. A key sees only its
+    own organisation's documents; a user marked `is_staff` sees all of them,
+    which is what the admin panel is for.
+    """
+
+    __tablename__ = "organisations"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    name: Mapped[str] = mapped_column(String(200), unique=True)
+    #: Short and stable, for URLs and the command line.
+    slug: Mapped[str] = mapped_column(String(60), unique=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+
 class Document(Base):
-    """One uploaded file. `sha256` is the dedup key: a repeat upload of
-    identical bytes returns this same row and queues no further work."""
+    """One uploaded file. `(organisation_id, sha256)` is the dedup key: a repeat
+    upload of identical bytes by the same organisation returns this same row
+    and queues no further work."""
 
     __tablename__ = "documents"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
-    sha256: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    #: Who this belongs to. See the tenancy note above Organisation.
+    organisation_id: Mapped[str] = mapped_column(ForeignKey("organisations.id"), index=True)
+    #: Not unique on its own any more. It was, and so a client uploading a file
+    #: another client had already sent got the *other client's* document back,
+    #: extracted data and all. Unique per organisation, below.
+    sha256: Mapped[str] = mapped_column(String(64), index=True)
     storage_key: Mapped[str] = mapped_column(String(255))
     mime_type: Mapped[str] = mapped_column(String(100))
     original_filename: Mapped[str | None] = mapped_column(String(255))
@@ -170,6 +197,8 @@ class Document(Base):
         back_populates="document", order_by="DocumentEvent.created_at"
     )
 
+    __table_args__ = (UniqueConstraint("organisation_id", "sha256"),)
+
 
 class OcrResult(Base):
     """Raw OCR output, kept verbatim so extraction can be re-run in phase 5
@@ -183,6 +212,9 @@ class OcrResult(Base):
     document_id: Mapped[str] = mapped_column(
         ForeignKey("documents.id"), unique=True
     )
+    #: The document's organisation, copied onto this row by the before_flush
+    #: hook below rather than by each caller -- see `_follow_the_document`.
+    organisation_id: Mapped[str] = mapped_column(ForeignKey("organisations.id"), index=True)
     engine: Mapped[str] = mapped_column(String(50))  # "tesseract", "paddleocr", ...
     engine_version: Mapped[str | None] = mapped_column(String(100))
     # Engine-specific knobs (language, dpi, model size) so an eval run can be
@@ -208,6 +240,9 @@ class DocumentEvent(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     document_id: Mapped[str] = mapped_column(ForeignKey("documents.id"), index=True)
+    #: The document's organisation, copied onto this row by the before_flush
+    #: hook below rather than by each caller -- see `_follow_the_document`.
+    organisation_id: Mapped[str] = mapped_column(ForeignKey("organisations.id"), index=True)
     from_status: Mapped[str | None] = mapped_column(String(32))  # null on creation
     to_status: Mapped[str] = mapped_column(String(32))
     detail: Mapped[dict | None] = mapped_column(JsonType)  # error text, timings, ...
@@ -235,6 +270,9 @@ class Job(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     kind: Mapped[str] = mapped_column(String(50))  # a JobKind: "ocr" or "extract"
     document_id: Mapped[str] = mapped_column(ForeignKey("documents.id"), index=True)
+    #: The document's organisation, copied onto this row by the before_flush
+    #: hook below rather than by each caller -- see `_follow_the_document`.
+    organisation_id: Mapped[str] = mapped_column(ForeignKey("organisations.id"), index=True)
     status: Mapped[str] = mapped_column(String(20), default=JobStatus.QUEUED)
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     max_attempts: Mapped[int] = mapped_column(Integer, default=3)
@@ -351,6 +389,9 @@ class Extraction(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     document_id: Mapped[str] = mapped_column(ForeignKey("documents.id"), index=True)
+    #: The document's organisation, copied onto this row by the before_flush
+    #: hook below rather than by each caller -- see `_follow_the_document`.
+    organisation_id: Mapped[str] = mapped_column(ForeignKey("organisations.id"), index=True)
 
     #: document_types.name, plus the version that produced this row.
     doc_type: Mapped[str] = mapped_column(String(50))
@@ -429,6 +470,9 @@ class Transaction(Base):
     #: Denormalised from the extraction: the supersede query and every
     #: "show me this document's ledger entry" lookup go through it.
     document_id: Mapped[str] = mapped_column(ForeignKey("documents.id"), index=True)
+    #: The document's organisation, copied onto this row by the before_flush
+    #: hook below rather than by each caller -- see `_follow_the_document`.
+    organisation_id: Mapped[str] = mapped_column(ForeignKey("organisations.id"), index=True)
     #: The document type that produced this, e.g. "receipt".
     source_type: Mapped[str] = mapped_column(String(50))
 
@@ -501,6 +545,9 @@ class ApiKey(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     #: What this key is for, so an unused one can be retired with confidence.
     name: Mapped[str] = mapped_column(String(200))
+    #: The organisation whose documents this key may see -- only those. Keys
+    #: are never staff: they are what end up inside ERPs and scripts.
+    organisation_id: Mapped[str] = mapped_column(ForeignKey("organisations.id"), index=True)
     key_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     #: The first few characters, shown in listings and logs. Not enough to use.
     prefix: Mapped[str] = mapped_column(String(20), index=True)
@@ -538,6 +585,11 @@ class User(Base):
     name: Mapped[str | None] = mapped_column(String(200))
     password_hash: Mapped[str] = mapped_column(String(200))
     role: Mapped[str] = mapped_column(String(10), default="author")
+    #: Who this belongs to. See the tenancy note above Organisation.
+    organisation_id: Mapped[str] = mapped_column(ForeignKey("organisations.id"), index=True)
+    #: The Ledgerline team: sees every organisation's documents. A client's
+    #: users never have this; they see their own organisation only.
+    is_staff: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
 
     #: Consecutive failures, and when signing in is allowed again after too
     #: many. Reset by a successful sign-in.
@@ -573,3 +625,25 @@ class UserSession(Base):
     revoked_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
 
     user: Mapped[User] = relationship()
+
+
+# --- Tenancy: rows that follow their document ---------------------------------
+
+_FOLLOWS_DOCUMENT = (OcrResult, DocumentEvent, Job, Extraction, Transaction)
+
+
+@event.listens_for(Session, "before_flush")
+def _follow_the_document(session: Session, _context, _instances) -> None:
+    """
+    Give every row made from a document its document's organisation.
+
+    In one place rather than at each of the dozen places such rows are
+    created, so none of them can forget -- and a row whose document cannot be
+    found keeps no organisation and fails its NOT NULL, loudly.
+    """
+    pending = {d.id: d for d in session.new if isinstance(d, Document)}
+    for row in session.new:
+        if isinstance(row, _FOLLOWS_DOCUMENT) and row.organisation_id is None:
+            document = pending.get(row.document_id) or session.get(Document, row.document_id)
+            if document is not None:
+                row.organisation_id = document.organisation_id

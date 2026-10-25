@@ -10,12 +10,14 @@ from core.status import DocStatus, JobKind, JobStatus
 from ocr.base import UnsupportedMediaType
 from worker import run as worker
 
-from .conftest import TINY_PNG, FakeEngine, ForbiddenExtractor, sqlite_only
+from .conftest import TINY_PNG, FakeEngine, ForbiddenExtractor, demo_org_id, sqlite_only
 
 
 def _ingest(session, data=TINY_PNG, name="receipt.png"):
     document, _ = repository.ingest(
-        session, data=data, mime_type="image/png", original_filename=name
+        session,
+        organisation_id=demo_org_id(session),
+        data=data, mime_type="image/png", original_filename=name
     )
     return document
 
@@ -291,7 +293,9 @@ class TestTick:
 
         with session_factory() as s:
             repository.ingest(
-                s, data=TINY_PNG, mime_type="image/png", original_filename="a.png"
+                s,
+                organisation_id=demo_org_id(s),
+                data=TINY_PNG, mime_type="image/png", original_filename="a.png"
             )
 
         # OCR, then the extract job it queues, then an empty queue. The
@@ -312,7 +316,9 @@ class TestTick:
 
         with session_factory() as s:
             document, _ = repository.ingest(
-                s, data=TINY_PNG, mime_type="image/png", original_filename="a.png"
+                s,
+                organisation_id=demo_org_id(s),
+                data=TINY_PNG, mime_type="image/png", original_filename="a.png"
             )
             s.query(Job).delete()
             s.add(Job(kind="teleport", document_id=document.id))

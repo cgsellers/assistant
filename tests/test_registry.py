@@ -14,7 +14,7 @@ from core.models import DocumentTypeDefinition, Extraction
 from doctypes import registry
 from doctypes.definition import Definition, FieldSpec, FieldType, Matchers, Profile
 
-from .conftest import TINY_PNG
+from .conftest import TINY_PNG, demo_org_id
 
 # A document that is unambiguously an invoice and only weakly a receipt.
 INVOICE_TEXT = """
@@ -71,7 +71,9 @@ def _register(session, definition: Definition, **kwargs) -> DocumentTypeDefiniti
 
 def _document(session):
     document, _ = repository.ingest(
-        session, data=TINY_PNG, mime_type="image/png", original_filename="x.png"
+        session,
+        organisation_id=demo_org_id(session),
+        data=TINY_PNG, mime_type="image/png", original_filename="x.png"
     )
     return document
 
@@ -466,7 +468,9 @@ class TestRecordExtraction:
     def test_current_is_scoped_to_one_document(self, session):
         first = _document(session)
         second, _ = repository.ingest(
-            session, data=TINY_PNG + b"other", mime_type="image/png", original_filename="b.png"
+            session,
+            organisation_id=demo_org_id(session),
+            data=TINY_PNG + b"other", mime_type="image/png", original_filename="b.png"
         )
         a = self._record(session, first)
         self._record(session, second)

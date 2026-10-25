@@ -19,7 +19,7 @@ from core.models import Transaction
 from doctypes.canonical import to_ledger
 from doctypes.definition import Definition
 
-from .conftest import TINY_PNG
+from .conftest import TINY_PNG, demo_org_id
 
 FIELDS = {
     "vendor": {"type": "string", "description": "The vendor."},
@@ -188,7 +188,9 @@ class TestRecordingIt:
     @pytest.fixture
     def extraction(self, session):
         document, _ = repository.ingest(
-            session, data=TINY_PNG, mime_type="image/png", original_filename="a.png"
+            session,
+            organisation_id=demo_org_id(session),
+            data=TINY_PNG, mime_type="image/png", original_filename="a.png"
         )
         return repository.record_extraction(
             session,

@@ -38,7 +38,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from api.routes.auth import set_session_cookie
 from api.routes.documents import check_upload
 from api.routes.processors import get_drafter, get_extractor, get_ocr_engine
-from core import repository, users
+from core import repository, tenancy, users
 from core.auth import SESSION_COOKIE, Principal, Role, require_principal, require_role
 from core.db import get_session
 from doctypes import authoring, results
@@ -257,6 +257,7 @@ def documents(
     request: Request,
     outcome: str = "",
     processor: str = "",
+    organisation: str = "",
     days: str = "",
     before: str = "",
     session: Session = Depends(get_session),
@@ -270,6 +271,7 @@ def documents(
         session,
         outcome=outcome or None,
         processor=processor or None,
+        organisation_id=organisation or None,
         since=since,
         before=cursor,
         limit=PAGE_SIZE,
@@ -277,7 +279,11 @@ def documents(
     return _page(
         request, "documents.html", principal,
         rows=rows,
-        filters={"outcome": outcome, "processor": processor, "days": days},
+        filters={
+            "outcome": outcome, "processor": processor, "organisation": organisation,
+            "days": days,
+        },
+        organisations=tenancy.all_organisations(session),
         outcomes=sorted(set(results.OUTCOMES.values())),
         processors=[p.name for p in authoring.list_processors(session)],
         next_before=rows[-1].uploaded_at.isoformat() if len(rows) == PAGE_SIZE else None,

@@ -17,7 +17,7 @@ from analyst import tools
 from core import repository
 from core.models import Transaction
 
-from .conftest import TINY_PNG
+from .conftest import TINY_PNG, demo_org_id
 
 
 @pytest.fixture
@@ -37,6 +37,7 @@ def ledger(session):
     ):
         document, _ = repository.ingest(
             session,
+            organisation_id=demo_org_id(session),
             data=TINY_PNG + (sha or str(len(made))).encode(),
             mime_type="image/png",
             original_filename=f"r{len(made)}.png",

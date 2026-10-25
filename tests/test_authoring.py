@@ -17,7 +17,7 @@ from core.models import DocumentTypeDefinition, Extraction, OcrResult, Transacti
 from doctypes import authoring, registry
 from doctypes.authoring import AuthoringError, Conflict, NotFound
 
-from .conftest import TINY_PNG, FakeExtractor
+from .conftest import TINY_PNG, FakeExtractor, demo_org_id
 
 TEXT = "CAFE LUNA\nTICKET 0042\nTOTAL 9.35"
 
@@ -208,7 +208,9 @@ class TestTrialRuns:
 
     def _document(self, session):
         document, _ = repository.ingest(
-            session, data=TINY_PNG, mime_type="image/png", original_filename="a.png"
+            session,
+            organisation_id=demo_org_id(session),
+            data=TINY_PNG, mime_type="image/png", original_filename="a.png"
         )
         session.add(OcrResult(
             document_id=document.id, engine="fake", engine_version="1", params={},
@@ -270,7 +272,9 @@ class TestTrialRuns:
     def test_a_document_without_ocr_is_explained(self, session):
         draft = authoring.create_draft(session, _spec(), based_on=None, created_by="t")
         document, _ = repository.ingest(
-            session, data=TINY_PNG, mime_type="image/png", original_filename="a.png"
+            session,
+            organisation_id=demo_org_id(session),
+            data=TINY_PNG, mime_type="image/png", original_filename="a.png"
         )
         with pytest.raises(AuthoringError, match="not been through OCR"):
             authoring.trial_run(

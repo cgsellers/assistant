@@ -10,14 +10,16 @@ from sqlalchemy import event, select
 from core import repository
 from core.models import Job, utcnow
 
-from .conftest import TINY_PNG, sqlite_only
+from .conftest import TINY_PNG, demo_org_id, sqlite_only
 
 
 @pytest.fixture
 def document(session):
     """jobs.document_id is NOT NULL and a foreign key, so a job needs a parent."""
     doc, _ = repository.ingest(
-        session, data=TINY_PNG, mime_type="image/png", original_filename="r.png"
+        session,
+        organisation_id=demo_org_id(session),
+        data=TINY_PNG, mime_type="image/png", original_filename="r.png"
     )
     session.query(Job).delete()  # ingest queues one; these tests add their own
     session.commit()

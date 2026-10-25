@@ -19,7 +19,7 @@ from analyst import tools
 from analyst.agent import TOOL_SPECS, Analyst, AnalystError, run_tool
 from core import repository
 
-from .conftest import TINY_PNG
+from .conftest import TINY_PNG, demo_org_id
 
 
 def _text(text):
@@ -66,6 +66,7 @@ def ledger(session):
     def _add(amount, *, who="MERCADONA S.A.", when=date(2026, 3, 1), currency="EUR"):
         document, _ = repository.ingest(
             session,
+            organisation_id=demo_org_id(session),
             data=TINY_PNG + str(amount).encode(),
             mime_type="image/png",
             original_filename="r.png",

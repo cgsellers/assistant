@@ -33,7 +33,7 @@ from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session
 
 from core import money, repository
-from core.models import Document, Extraction, Job, Transaction
+from core.models import Document, Extraction, Job, Organisation, Transaction
 from core.status import DocStatus
 from doctypes.definition import Definition
 from doctypes.transform import to_wire
@@ -152,6 +152,7 @@ def _transaction(row: Transaction) -> dict[str, Any]:
 class DocumentRow:
     id: str
     filename: str | None
+    organisation: str
     uploaded_at: datetime
     status: str
     outcome: str
@@ -173,6 +174,7 @@ def list_documents(
     *,
     outcome: str | None = None,
     processor: str | None = None,
+    organisation_id: str | None = None,
     since: datetime | None = None,
     before: datetime | None = None,
     limit: int = 50,
@@ -191,12 +193,14 @@ def list_documents(
     stmt = (
         select(
             Document,
+            Organisation.name,
             Extraction.doc_type,
             Extraction.schema_version,
             Transaction.amount,
             Transaction.currency,
             cost,
         )
+        .join(Organisation, Organisation.id == Document.organisation_id)
         .outerjoin(
             Extraction,
             and_(Extraction.document_id == Document.id, Extraction.is_current.is_(True)),
@@ -212,6 +216,8 @@ def list_documents(
         stmt = stmt.where(Document.status.in_(statuses_for(outcome)))
     if processor:
         stmt = stmt.where(Extraction.doc_type == processor)
+    if organisation_id:
+        stmt = stmt.where(Document.organisation_id == organisation_id)
     if since is not None:
         stmt = stmt.where(Document.uploaded_at >= since)
     if before is not None:
@@ -221,6 +227,7 @@ def list_documents(
         DocumentRow(
             id=document.id,
             filename=document.original_filename,
+            organisation=organisation,
             uploaded_at=document.uploaded_at,
             status=document.status,
             outcome=OUTCOMES.get(document.status, "processing"),
@@ -230,7 +237,8 @@ def list_documents(
             currency=currency,
             cost_usd=Decimal(str(spent or 0)),
         )
-        for document, doc_type, version, amount, currency, spent in session.execute(stmt)
+        for document, organisation, doc_type, version, amount, currency, spent
+        in session.execute(stmt)
     ]
 
 
@@ -264,6 +272,7 @@ def document_detail(session: Session, document: Document) -> dict[str, Any]:
     trials = [a.cost_usd for a in attempts if a.is_trial and a.cost_usd is not None]
     return {
         "document": document,
+        "organisation": session.get(Organisation, document.organisation_id),
         "result": document_result(session, document),
         "timeline": timeline,
         "attempts": attempts,

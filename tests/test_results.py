@@ -17,7 +17,7 @@ from doctypes import registry, seed
 from doctypes.results import OUTCOMES
 from worker import run as worker
 
-from .conftest import TINY_PNG, FakeExtractor
+from .conftest import TINY_PNG, FakeExtractor, demo_org_id
 
 INVOICE_TEXT = (
     "ACME LTD\nINVOICE INV-2041\nDue Date: 13 April 2026\nBill To: Northwind\n"
@@ -40,7 +40,9 @@ def processed(session):
 
     def _run(text: str, data: dict | None, *, content: bytes = TINY_PNG):
         document, _ = repository.ingest(
-            session, data=content, mime_type="image/png", original_filename="d.png"
+            session,
+            organisation_id=demo_org_id(session),
+            data=content, mime_type="image/png", original_filename="d.png"
         )
         session.query(Job).delete()
         document.status = DocStatus.OCR_DONE

@@ -13,6 +13,8 @@ from api.main import app
 from core import auth, repository, users
 from doctypes import authoring, registry, seed
 
+from .conftest import demo_org_id
+
 pytestmark = pytest.mark.usefixtures("fast_hashing")
 
 PASSWORD = "correct horse battery"
@@ -23,7 +25,10 @@ def _seeded(session_factory):
     registry.clear_cache()
     with session_factory() as s:
         seed.sync(s, seed.load_seeds())
-        users.create(s, "ana@example.com", PASSWORD, role="admin")
+        users.create(
+            s, "ana@example.com", PASSWORD, role="admin", organisation_id=demo_org_id(s),
+            is_staff=True,
+        )
     yield
     registry.clear_cache()
 
@@ -420,7 +425,10 @@ class TestPublishing:
 
     def test_an_author_cannot_publish(self, _wired, session_factory):
         with session_factory() as s:
-            users.create(s, "bo@example.com", PASSWORD, role="author")
+            users.create(
+                s, "bo@example.com", PASSWORD, role="author", organisation_id=demo_org_id(s),
+                is_staff=True,
+            )
             base = authoring.get_version(s, "invoice", 1).definition
             draft = authoring.create_draft(s, base, based_on=1, created_by="bo")
         with TestClient(app, base_url="https://testserver") as bo:

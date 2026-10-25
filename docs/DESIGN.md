@@ -1811,6 +1811,36 @@ ends the business. So:
   serve everyone, and a client can have types for their own vendors. A client's
   documents route against the shared ones plus their own.
 
+Refined when it came to building it:
+
+- **The team is an organisation too.** "Ledgerline demo" holds everything uploaded
+  before tenancy, and the team's own uploads and keys, so "only my team's documents"
+  is an ordinary organisation filter. The team's *users* see across organisations
+  because they carry `is_staff`, not because of where they belong. **A key is never
+  staff**: keys end up inside ERPs and scripts, so they see their own organisation's
+  documents and nothing else.
+- **Processor access is a list, per processor.** It is either *all organisations*
+  (the generic invoice) or *these organisations* (a client's dedicated receipt
+  processor). It belongs to the processor, not to a version: it says who may use it,
+  not what it does. **A new processor starts with no access**, so a client-specific one
+  can't reach everyone because nobody restricted it. On an equal match, a client's own
+  processor beats a shared one. Built in step 4.4, with routing.
+
+**Built so far: 4.1, ownership.**
+- An `organisations` table. Documents, users and API keys own explicitly.
+- OCR results, events, jobs, extractions and ledger rows take their document's
+  organisation in one `before_flush` hook, so none of the dozen places that create them
+  can forget. A row with no findable document fails its NOT NULL, loudly.
+- Duplicate detection is per organisation, and a test uploads the same bytes as two
+  organisations: each gets its own document, while one copy sits on disk.
+- The migration creates "Ledgerline demo", moves every existing row into it and makes
+  existing users staff. It goes up, down and up on both databases, and it was run on a
+  copy of the real development database before the real one: every row came out owned.
+- `python -m core.tenancy create "Acme Ltd" acme` makes a client organisation, and
+  `--client acme` on `core.users` and `core.auth` gives it a user or a key.
+
+Ownership is only recorded so far: who sees what is still unchanged until 4.2.
+
 ### 9.2 Why Postgres
 
 SQLite was right for getting started: nothing to run, and a suite of several hundred

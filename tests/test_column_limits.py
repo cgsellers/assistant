@@ -18,13 +18,15 @@ from core.models import Document
 from doctypes import authoring
 from doctypes.definition import Definition
 
-from .conftest import TINY_PNG, receipt_definition
+from .conftest import TINY_PNG, demo_org_id, receipt_definition
 
 
 def test_an_uploaders_overlong_filename_is_cut_keeping_its_extension(session):
     name = "scan-" + "x" * 400 + ".pdf"
     document, _ = repository.ingest(
-        session, data=TINY_PNG, mime_type="image/png", original_filename=name
+        session,
+        organisation_id=demo_org_id(session),
+        data=TINY_PNG, mime_type="image/png", original_filename=name
     )
     session.expire_all()
     stored = session.get(Document, document.id).original_filename
@@ -34,7 +36,9 @@ def test_an_uploaders_overlong_filename_is_cut_keeping_its_extension(session):
 
 def test_a_normal_filename_is_left_alone(session):
     document, _ = repository.ingest(
-        session, data=TINY_PNG, mime_type="image/png", original_filename="receipt.jpg"
+        session,
+        organisation_id=demo_org_id(session),
+        data=TINY_PNG, mime_type="image/png", original_filename="receipt.jpg"
     )
     assert document.original_filename == "receipt.jpg"
 
@@ -52,7 +56,10 @@ def test_a_worker_with_that_id_can_still_claim(session, monkeypatch):
     from worker import run as worker
 
     monkeypatch.setattr(worker.socket, "gethostname", lambda: "h" * 300)
-    repository.ingest(session, data=TINY_PNG, mime_type="image/png", original_filename="a.png")
+    repository.ingest(
+        session, organisation_id=demo_org_id(session), data=TINY_PNG, mime_type="image/png",
+        original_filename="a.png",
+    )
     assert worker.claim(session, me=worker.worker_id()) is not None
 
 
@@ -69,7 +76,10 @@ def test_a_profile_name_too_long_for_its_column_is_refused():
 def test_the_longest_email_fits_in_created_by_with_the_ai_suffix(session, fast_hashing):
     email = ("a" * 64) + "@" + ("b" * 185) + ".com"
     assert len(email) == 254
-    users.create(session, email, "correct horse battery")
+    users.create(
+        session, email, "correct horse battery", organisation_id=demo_org_id(session),
+        is_staff=True,
+    )
     row = authoring.create_draft(
         session, receipt_definition(), based_on=None,
         created_by=f"user:{email} (ai draft)",
@@ -80,9 +90,12 @@ def test_the_longest_email_fits_in_created_by_with_the_ai_suffix(session, fast_h
 
 def test_an_overlong_email_or_key_name_is_refused_with_a_reason(session, fast_hashing):
     with pytest.raises(ValueError, match="at most 254"):
-        users.create(session, "a" * 250 + "@x.com", "correct horse battery")
+        users.create(
+            session, "a" * 250 + "@x.com", "correct horse battery",
+            organisation_id=demo_org_id(session), is_staff=True,
+        )
     with pytest.raises(ValueError, match="at most 200"):
-        auth.create(session, "k" * 201)
+        auth.create(session, "k" * 201, organisation_id=demo_org_id(session))
 
 
 def test_every_shipped_processor_fits_its_columns():

@@ -87,6 +87,12 @@ class Principal:
     kind: str  # "key", "user", or "local" when auth is off
     name: str
     role: Role
+    #: Whose documents this caller works with: their uploads land here, and
+    #: (from step 4.2) it is all they see. None only when auth is off.
+    organisation_id: str | None = None
+    #: The Ledgerline team, which sees every organisation. Users only; a key
+    #: is never staff.
+    is_staff: bool = False
 
     @property
     def label(self) -> str:
@@ -99,7 +105,7 @@ class Principal:
 
 #: Auth switched off for local work: everything is allowed, and the lifespan
 #: hook has already warned about it.
-LOCAL = Principal(kind="local", name="local", role=Role.ADMIN)
+LOCAL = Principal(kind="local", name="local", role=Role.ADMIN, is_staff=True)
 
 #: `last_used_at` is useful for spotting a key nobody uses any more, but
 #: writing it on every request turns every GET into a write, and SQLite
@@ -117,16 +123,19 @@ def fingerprint(key: str) -> str:
     return hashlib.sha256(key.encode()).hexdigest()
 
 
-def create(session: Session, name: str, *, role: str = Role.AUTHOR) -> tuple[ApiKey, str]:
+def create(
+    session: Session, name: str, *, organisation_id: str, role: str = Role.AUTHOR
+) -> tuple[ApiKey, str]:
     """
-    Mint a key. Returns the row and the secret, which is the only time the
-    secret exists anywhere.
+    Mint a key for one organisation. Returns the row and the secret, which is
+    the only time the secret exists anywhere.
     """
     if len(name) > 200:
         raise ValueError("a key's name is at most 200 characters")
     secret = generate()
     row = ApiKey(
-        name=name, key_hash=fingerprint(secret), prefix=secret[:VISIBLE], role=Role(role)
+        name=name, key_hash=fingerprint(secret), prefix=secret[:VISIBLE], role=Role(role),
+        organisation_id=organisation_id,
     )
     session.add(row)
     session.commit()
@@ -205,7 +214,9 @@ def require_principal(
         key = authenticate(session, presented)
         if key is None:
             raise _refused()
-        return Principal(kind="key", name=key.name, role=Role(key.role))
+        return Principal(
+            kind="key", name=key.name, role=Role(key.role), organisation_id=key.organisation_id
+        )
 
     from core import users
 
@@ -223,7 +234,10 @@ def require_principal(
         )
     request.state.user_session = signed_in
     user = signed_in.user
-    return Principal(kind="user", name=user.email, role=Role(user.role))
+    return Principal(
+        kind="user", name=user.email, role=Role(user.role),
+        organisation_id=user.organisation_id, is_staff=user.is_staff,
+    )
 
 
 def require_role(role: Role):
@@ -266,6 +280,10 @@ def main() -> None:
         "--role", choices=[r.value for r in Role], default=Role.AUTHOR,
         help="admin keys can publish and retire processors",
     )
+    made.add_argument(
+        "--client", metavar="SLUG",
+        help="the client organisation it belongs to; Ledgerline demo if omitted",
+    )
     sub.add_parser("list", help="show keys, without their secrets")
     killed = sub.add_parser("revoke", help="retire a key")
     killed.add_argument("prefix", help="the visible prefix, e.g. lk_A1b2C3d4")
@@ -277,7 +295,17 @@ def main() -> None:
 
     with SessionLocal() as session:
         if args.command == "create":
-            row, secret = create(session, args.name, role=args.role)
+            from core import tenancy
+
+            organisation = (
+                tenancy.by_slug(session, args.client) if args.client
+                else tenancy.demo_organisation(session)
+            )
+            if organisation is None:
+                raise SystemExit(f"no organisation called {args.client!r}")
+            row, secret = create(
+                session, args.name, role=args.role, organisation_id=organisation.id
+            )
             log.info("%s", secret)
             log.info("")
             log.info("Saved as %s. This is the only time it is shown.", row.prefix)

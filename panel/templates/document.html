@@ -21,6 +21,7 @@
 
   <section class="outcome">
     <dl class="meta">
+      <dt>Organisation</dt><dd>{{ organisation.name }}</dd>
       <dt>Status</dt><dd>{{ doc.status|replace("_", " ") }}</dd>
       <dt>Processor</dt><dd>{% if result.processor %}<a href="/panel/processors/{{ result.processor.name }}/versions/{{ result.processor.version }}">{{ result.processor.name }} v{{ result.processor.version }}</a>{% if result.processor.profile %} · profile {{ result.processor.profile }}{% endif %}{% else %}—{% endif %}</dd>
       <dt>Uploaded</dt><dd>{{ doc.uploaded_at.strftime("%Y-%m-%d %H:%M:%S") }} UTC</dd>

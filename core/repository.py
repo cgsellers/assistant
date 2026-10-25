@@ -27,8 +27,13 @@ from core.status import DocStatus, JobKind
 from doctypes.definition import Definition
 
 
-def find_by_sha256(session: Session, digest: str) -> Document | None:
-    return session.scalar(select(Document).where(Document.sha256 == digest))
+def find_by_sha256(session: Session, organisation_id: str, digest: str) -> Document | None:
+    """This organisation's copy of these bytes. Another's never counts as a duplicate."""
+    return session.scalar(
+        select(Document).where(
+            Document.organisation_id == organisation_id, Document.sha256 == digest
+        )
+    )
 
 
 def get_document(session: Session, document_id: str) -> Document | None:
@@ -42,20 +47,23 @@ def get_ocr_result(session: Session, document_id: str) -> OcrResult | None:
 def ingest(
     session: Session,
     *,
+    organisation_id: str,
     data: bytes,
     mime_type: str,
     original_filename: str | None,
 ) -> tuple[Document, bool]:
     """
-    Store a file and register it for processing.
+    Store a file and register it for processing, owned by `organisation_id`.
 
-    Returns (document, created). `created` is False when these exact bytes were
-    already ingested -- the caller gets the original document back and nothing
-    new is written. That makes upload safe to retry.
+    Returns (document, created). `created` is False when this organisation
+    already ingested these exact bytes -- the caller gets its original document
+    back and nothing new is written. That makes upload safe to retry. Another
+    organisation's identical file is not a duplicate: it gets its own document,
+    though the bytes on disk are shared, since storage is addressed by content.
     """
     digest = storage.sha256_hex(data)
 
-    existing = find_by_sha256(session, digest)
+    existing = find_by_sha256(session, organisation_id, digest)
     if existing is not None:
         return existing, False
 
@@ -65,6 +73,7 @@ def ingest(
 
     original_filename = _fit_filename(original_filename)
     document = Document(
+        organisation_id=organisation_id,
         sha256=digest,
         storage_key=key,
         mime_type=mime_type,
@@ -83,7 +92,7 @@ def ingest(
         # above, both tried to INSERT, the unique index on sha256 rejected the
         # loser. The winner's row is what the caller wanted anyway.
         session.rollback()
-        winner = find_by_sha256(session, digest)
+        winner = find_by_sha256(session, organisation_id, digest)
         if winner is None:
             raise
         return winner, False

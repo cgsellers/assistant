@@ -18,7 +18,7 @@ from core.status import DocStatus, JobKind
 from doctypes import registry, seed
 from worker import run as worker
 
-from .conftest import TINY_PNG, FakeExtractor
+from .conftest import TINY_PNG, FakeExtractor, demo_org_id
 
 pytestmark = pytest.mark.usefixtures("fast_hashing")
 
@@ -38,7 +38,10 @@ def _seeded(session_factory):
     registry.clear_cache()
     with session_factory() as s:
         seed.sync(s, seed.load_seeds())
-        users.create(s, "ana@example.com", PASSWORD, role="admin")
+        users.create(
+            s, "ana@example.com", PASSWORD, role="admin", organisation_id=demo_org_id(s),
+            is_staff=True,
+        )
     yield
     registry.clear_cache()
 
@@ -59,7 +62,9 @@ def processed(session):
              content: bytes | None = None, mime: str = "image/png"):
         payload = content or TINY_PNG + bytes([next(counter) % 256]) * (next(counter) + 1)
         document, _ = repository.ingest(
-            session, data=payload, mime_type=mime, original_filename=filename
+            session,
+            organisation_id=demo_org_id(session),
+            data=payload, mime_type=mime, original_filename=filename
         )
         session.query(Job).filter_by(document_id=document.id).delete()
         document.status = DocStatus.OCR_DONE
@@ -200,7 +205,9 @@ class TestOneDocument:
 class TestTheOriginalFile:
     def test_it_is_the_bytes_as_uploaded_with_safe_headers(self, client, session):
         document, _ = repository.ingest(
-            session, data=TINY_PNG, mime_type="image/png", original_filename="r.png"
+            session,
+            organisation_id=demo_org_id(session),
+            data=TINY_PNG, mime_type="image/png", original_filename="r.png"
         )
         response = client.get(f"/documents/{document.id}/file")
 
@@ -214,7 +221,9 @@ class TestTheOriginalFile:
     def test_a_hostile_filename_cannot_break_out_of_the_header(self, client, session):
         name = 'evil"\r\nX-Injected: yes.png'
         document, _ = repository.ingest(
-            session, data=TINY_PNG, mime_type="image/png", original_filename=name
+            session,
+            organisation_id=demo_org_id(session),
+            data=TINY_PNG, mime_type="image/png", original_filename=name
         )
         response = client.get(f"/documents/{document.id}/file")
         assert "x-injected" not in response.headers
@@ -226,9 +235,35 @@ class TestTheOriginalFile:
     def test_unknown_and_missing_files_are_404s(self, client, session, settings):
         assert client.get("/documents/nope/file").status_code == 404
         document, _ = repository.ingest(
-            session, data=TINY_PNG, mime_type="image/png", original_filename="r.png"
+            session,
+            organisation_id=demo_org_id(session),
+            data=TINY_PNG, mime_type="image/png", original_filename="r.png"
         )
         (settings.storage_dir / document.storage_key).unlink()
         response = client.get(f"/documents/{document.id}/file")
         assert response.status_code == 404
         assert "missing from storage" in response.json()["detail"]
+
+
+class TestByOrganisation:
+    def test_the_list_shows_and_filters_by_organisation(self, browser, processed, session):
+        from core import tenancy
+
+        acme = tenancy.create(session, "Acme Ltd", "acme")
+        processed(INVOICE_TEXT, None, filename="team-upload.png")
+        document, _ = repository.ingest(
+            session, organisation_id=acme.id, data=b"acme-bytes", mime_type="image/png",
+            original_filename="acme-upload.png",
+        )
+
+        everything = browser.get("/panel/documents").text
+        assert "<td>Ledgerline demo</td>" in everything and "<td>Acme Ltd</td>" in everything
+
+        team_only = browser.get(
+            f"/panel/documents?organisation={tenancy.demo_organisation(session).id}"
+        ).text
+        assert "team-upload.png" in team_only and "acme-upload.png" not in team_only
+
+        assert "<dt>Organisation</dt><dd>Acme Ltd</dd>" in browser.get(
+            f"/panel/documents/{document.id}"
+        ).text

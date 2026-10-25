@@ -9,11 +9,14 @@ from core import repository, storage
 from core.models import Document, DocumentEvent, Job, OcrResult
 from core.status import DocStatus, JobStatus
 
-from .conftest import TINY_PNG
+from .conftest import TINY_PNG, demo_org_id
 
 
 def _ingest(session, data=TINY_PNG, mime="image/png", name="receipt.png"):
-    return repository.ingest(session, data=data, mime_type=mime, original_filename=name)
+    return repository.ingest(
+        session, organisation_id=demo_org_id(session), data=data, mime_type=mime,
+        original_filename=name,
+    )
 
 
 class TestIngest:
@@ -120,11 +123,11 @@ class TestConcurrentIngest:
         real = repository.find_by_sha256
         calls = {"n": 0}
 
-        def flaky(sess, digest):
+        def flaky(sess, organisation_id, digest):
             calls["n"] += 1
             if calls["n"] == 1:
                 return None  # pretend the other worker had not committed yet
-            return real(sess, digest)
+            return real(sess, organisation_id, digest)
 
         monkeypatch.setattr(repository, "find_by_sha256", flaky)
 
