@@ -24,7 +24,10 @@ What it does not cover, and why that is acceptable:
   * **Inserts.** Nothing is filtered on the way in; ownership on write is
     4.1's job (the caller's organisation, and the before_flush hook).
 
-The database enforces the same rule underneath, from step 4.3.
+The database enforces the same rule underneath (step 4.3). On Postgres
+every transaction tells the database its scope, and row-level security
+policies on the same tables refuse every other organisation's rows -- to raw
+SQL as well, and to any mistake made above. See `_tell_postgres`.
 """
 
 from __future__ import annotations
@@ -84,6 +87,10 @@ def set_scope(session: Session, scope: Scope) -> None:
             f"this session is already scoped to {current.reason}; open a new one"
         )
     session.info[_KEY] = scope
+    # A transaction may already be open -- a request authenticates before it
+    # knows whose scope it is -- and `after_begin` has been and gone for it.
+    if session.in_transaction():
+        _tell_postgres(session.connection(), scope)
 
 
 def get_scope(session: Session) -> Scope | None:
@@ -122,6 +129,33 @@ def _scope_every_statement(state: ORMExecuteState) -> None:
             )
             for model in CLIENT_DATA
         )
+    )
+
+
+@event.listens_for(Session, "after_begin")
+def _scope_every_transaction(session: Session, _transaction, connection) -> None:
+    scope = get_scope(session)
+    if scope is not None:
+        _tell_postgres(connection, scope)
+
+
+def _tell_postgres(connection, scope: Scope) -> None:
+    """
+    Hand the scope to the row-level security policies, for this transaction.
+
+    `set_config(..., true)` is transaction-local: it ends at COMMIT or
+    ROLLBACK, so a connection returned to the pool carries nothing into the
+    next request. Each transaction is told again. SQLite has nothing to tell.
+    """
+    if connection.dialect.name != "postgresql":
+        return
+    connection.exec_driver_sql(
+        "SELECT set_config('app.organisation_id', %(org)s, true), "
+        "set_config('app.all_organisations', %(all)s, true)",
+        {
+            "org": scope.organisation_id or "",
+            "all": "on" if scope.organisation_id is None else "off",
+        },
     )
 
 

@@ -1875,6 +1875,50 @@ way:
 What the application layer does not cover is raw SQL, which nothing uses for client data.
 That, and the rule held by the database itself, is step 4.3.
 
+**4.3, row-level security.** The second lock. A migration enables and **forces** a
+`tenant_isolation` policy on the six client-data tables. It reads two settings that every
+transaction receives from the session's scope (`set_config(..., true)` in
+`core/scoping.py`, from `after_begin`, and from `set_scope` when a transaction is already
+open, because a request signs in before it knows its scope):
+
+```sql
+USING / WITH CHECK (
+  current_setting('app.all_organisations', true) = 'on'
+  OR organisation_id = current_setting('app.organisation_id', true))
+```
+
+Three facts shaped it:
+
+- **Superusers always bypass row-level security, and owners do unless it is forced.**
+  The development and CI databases connect as a superuser, so policies alone would have
+  protected nothing. The API and worker now connect as `ledgerline_app`
+  (`core/dbroles.py`): it can log in, read and write rows, and only read
+  `alembic_version`. It is not a superuser, can't bypass row-level security, owns no
+  table and can't create one. Migrations and the role setup run as the owner, in
+  compose's one-off `migrate` step.
+- **The settings are transaction-local,** so a pooled connection carries nothing from one
+  request into the next. A test reuses one connection to prove it. A transaction that
+  set nothing sees **no rows**: the database fails closed too.
+- **The Postgres test run now uses the real migrations and the application role.** Before,
+  it used `create_all` and the owner, a superuser who would have bypassed every policy.
+  It refuses to run against a database whose name lacks "test", since it drops the schema.
+  `tests/test_row_level_security.py` uses raw SQL, which the application layer never sees,
+  to check the database refuses another organisation's rows: reading, changing,
+  deleting, and inserting rows labelled with another organisation. Its first test checks
+  that the connection is really bound. With the owner swapped back in, all seven fail.
+
+Found on the way: the role setup ran its statements on the driver's connection but
+committed through SQLAlchemy's, which had seen no transaction begin. So the commit did
+nothing, and the role vanished when the connection closed. Caught by the test run being
+unable to log in as it.
+
+Checked end to end in the containers: a client's invoice and the team's both processed by
+the worker through the policies. Each organisation's key gets a 404 for the other's
+document, and raw SQL as the application role with no scope set sees zero rows.
+
+SQLite has no row-level security; there the application layer is the only lock, and SQLite
+runs only on laptops and in the fast test run.
+
 ### 9.2 Why Postgres
 
 SQLite was right for getting started: nothing to run, and a suite of several hundred

@@ -12,8 +12,14 @@ start. Set TEST_DATABASE_URL to run all of it against Postgres instead --
 
 -- which is what CI does, because the two differ in exactly the ways that
 matter here: Postgres enforces column lengths, has real timestamps and exact
-decimals, and locks rows. The schema is built once per run there and every
-table emptied between tests; building it per test would take minutes.
+decimals, locks rows, and enforces row-level security.
+
+That URL is the database *owner*. The run builds the schema once with the
+real migrations -- policies included, which create_all would not make -- sets
+up the application's role (core/dbroles.py) and then connects every test as
+that role, as the API and worker do. Connecting as the owner, a superuser
+locally and in CI, would bypass every policy and test none of them. The owner
+connection only empties the tables between tests.
 """
 
 from __future__ import annotations
@@ -40,6 +46,23 @@ from ocr.base import OcrError, OcrOutput, TextBlock
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
 ON_POSTGRES = bool(TEST_DATABASE_URL)
 
+#: The application role's password in the test database. Not a secret: the
+#: test database is thrown away, and the role exists to be bound, not trusted.
+TEST_APP_PASSWORD = "ledgerline-app-test"
+
+
+def _app_url(owner_url: str) -> str:
+    """The owner's URL with the application role's credentials instead."""
+    from sqlalchemy.engine import make_url
+
+    from core.dbroles import APP_ROLE
+
+    url = make_url(owner_url).set(username=APP_ROLE, password=TEST_APP_PASSWORD)
+    return url.render_as_string(hide_password=False)
+
+
+APP_DATABASE_URL = _app_url(TEST_DATABASE_URL) if ON_POSTGRES else None
+
 #: For the few tests about SQLite's own quirks -- its foreign keys being off
 #: by default, its naive datetimes -- which have nothing to test on Postgres.
 sqlite_only = pytest.mark.skipif(ON_POSTGRES, reason="tests a SQLite-specific behaviour")
@@ -62,7 +85,7 @@ def settings(tmp_path, monkeypatch) -> Iterator[Settings]:
     inherit a tmp_path that has since been deleted.
     """
     monkeypatch.setenv(
-        "DATABASE_URL", TEST_DATABASE_URL or f"sqlite:///{tmp_path / 'test.db'}"
+        "DATABASE_URL", APP_DATABASE_URL or f"sqlite:///{tmp_path / 'test.db'}"
     )
     monkeypatch.setenv("STORAGE_DIR", str(tmp_path / "files"))
     # Pinned, because a developer's .env may relax them for local work -- and
@@ -75,13 +98,51 @@ def settings(tmp_path, monkeypatch) -> Iterator[Settings]:
 
 
 @pytest.fixture(scope="session")
-def _postgres_engine() -> Iterator[Engine]:
-    """One schema for the whole run, rebuilt at the start so it matches the models."""
-    engine = create_db_engine(TEST_DATABASE_URL)
-    Base.metadata.drop_all(engine)
-    Base.metadata.create_all(engine)
-    yield engine
-    engine.dispose()
+def _postgres_engines() -> Iterator[tuple[Engine, Engine]]:
+    """
+    (owner, app): the schema rebuilt from the migrations once per run, and the
+    application role set up to use it.
+    """
+    from alembic.config import Config
+    from sqlalchemy.engine import make_url
+
+    from alembic import command
+    from core.dbroles import ensure_app_role
+    from core.migrations import ALEMBIC_INI
+
+    database = make_url(TEST_DATABASE_URL).database or ""
+    if "test" not in database:
+        # The next line drops every table. Refuse anything not plainly a test
+        # database rather than trust that nobody ever points this elsewhere.
+        raise RuntimeError(f"TEST_DATABASE_URL names {database!r}; use a database named *test*")
+
+    owner = create_db_engine(TEST_DATABASE_URL)
+    with owner.begin() as connection:
+        connection.exec_driver_sql("DROP SCHEMA public CASCADE")
+        connection.exec_driver_sql("CREATE SCHEMA public")
+
+    # The real migrations, as a deploy runs them. Config() rather than the
+    # .ini, whose logging section would switch off the application's loggers.
+    config = Config()
+    config.set_main_option("script_location", str(ALEMBIC_INI.parent / "alembic"))
+    previous = os.environ.get("DATABASE_URL")
+    os.environ["DATABASE_URL"] = TEST_DATABASE_URL
+    get_settings.cache_clear()
+    try:
+        command.upgrade(config, "head")
+    finally:
+        if previous is None:
+            os.environ.pop("DATABASE_URL", None)
+        else:
+            os.environ["DATABASE_URL"] = previous
+        get_settings.cache_clear()
+
+    with owner.connect() as connection:
+        ensure_app_role(connection, TEST_APP_PASSWORD)
+    app = create_db_engine(APP_DATABASE_URL)
+    yield owner, app
+    app.dispose()
+    owner.dispose()
 
 
 @pytest.fixture
@@ -89,15 +150,17 @@ def db_engine(settings, request) -> Iterator[Engine]:
     """
     A fresh schema per test: a new SQLite file, or empty Postgres tables.
 
-    create_all rather than running migrations: it is far faster, and the
-    migration is separately checked for drift by `alembic check` in CI.
+    On SQLite, create_all: it is far faster, and the migrations are checked
+    against the models separately. On Postgres, the tables the migrations
+    built, emptied by the owner -- the application role may not TRUNCATE --
+    and the application role's engine handed to the test.
     """
     if ON_POSTGRES:
-        engine = request.getfixturevalue("_postgres_engine")
+        owner, app = request.getfixturevalue("_postgres_engines")
         tables = ", ".join(table.name for table in Base.metadata.sorted_tables)
-        with engine.begin() as connection:
+        with owner.begin() as connection:
             connection.execute(text(f"TRUNCATE {tables} RESTART IDENTITY CASCADE"))
-        yield engine
+        yield app
         return
     engine = create_db_engine(settings.database_url)
     Base.metadata.create_all(engine)

@@ -13,6 +13,13 @@ from sqlalchemy import text
 
 from core import migrations
 
+from .conftest import ON_POSTGRES, sqlite_only
+
+# On Postgres the test database is built by the real migrations and used
+# through the application role, which may read alembic_version but never
+# write it -- so the states below are faked on SQLite only, and Postgres
+# checks the real one.
+
 
 @pytest.fixture
 def stamp(db_engine):
@@ -40,12 +47,14 @@ def test_health_does_not_care_about_migrations(anon_client):
     assert anon_client.get("/health").status_code == 200
 
 
+@sqlite_only
 def test_an_unmigrated_database_is_not_ready(anon_client):
     response = anon_client.get("/ready")
     assert response.status_code == 503
     assert "has not been migrated" in response.json()["reason"]
 
 
+@sqlite_only
 def test_a_database_behind_the_code_is_not_ready_and_says_where_it_is(anon_client, stamp):
     stamp("0123456789ab")
     response = anon_client.get("/ready")
@@ -54,8 +63,9 @@ def test_a_database_behind_the_code_is_not_ready_and_says_where_it_is(anon_clien
     assert migrations.expected_revision() in response.json()["reason"]
 
 
-def test_a_database_at_head_is_ready(anon_client, stamp):
-    stamp(migrations.expected_revision())
+def test_a_database_at_head_is_ready(anon_client, request):
+    if not ON_POSTGRES:
+        request.getfixturevalue("stamp")(migrations.expected_revision())
     response = anon_client.get("/ready")
     assert response.status_code == 200
     assert response.json() == {"status": "ready", "revision": migrations.expected_revision()}

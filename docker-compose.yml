@@ -49,21 +49,25 @@ x-ocr: &ocr
     retries: 3
   restart: unless-stopped
 
+x-app-env: &app-env
+  # The application role, not the owner: row-level security binds it, and
+  # would not bind the owner (core/dbroles.py). Only `migrate` is the owner.
+  DATABASE_URL: postgresql+psycopg://ledgerline_app:${APP_DB_PASSWORD:-ledgerline-app-dev}@db:5432/ledgerline
+  OCR_SERVICE_URL: http://ocr:8001
+  STORAGE_DIR: /data/files
+  # From the shell or the project's .env, by name only: compose substitutes
+  # this one variable, and nothing else from .env reaches the containers.
+  ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+  # Plain http on localhost here; a deployment behind TLS leaves it on.
+  SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
+
 x-app: &app
   build:
     context: .
     dockerfile: Dockerfile
   image: ledgerline-app:dev
   profiles: [app]
-  environment:
-    DATABASE_URL: postgresql+psycopg://ledgerline:ledgerline@db:5432/ledgerline
-    OCR_SERVICE_URL: http://ocr:8001
-    STORAGE_DIR: /data/files
-    # From the shell or the project's .env, by name only: compose substitutes
-    # this one variable, and nothing else from .env reaches the containers.
-    ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-    # Plain http on localhost here; a deployment behind TLS leaves it on.
-    SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
+  environment: *app-env
   volumes:
     # The API writes uploads, the worker reads them: one store, shared.
     - files:/data/files
@@ -112,12 +116,21 @@ services:
     container_name: ledgerline-ocr-isolated
     networks: [ocr]
 
-  # Runs once per `up`, then exits: migrations, then the starter processors
-  # (create-only, so it never touches one edited in the panel). The API and
-  # worker wait for it to succeed, so neither ever sees an old schema.
+  # Runs once per `up`, then exits, as the database owner: migrations, the
+  # application role (created or put back, with exactly the rights it needs),
+  # then the starter processors (create-only, so it never touches one edited
+  # in the panel). The API and worker wait for it to succeed, so neither ever
+  # sees an old schema or a role without its grants.
   migrate:
     <<: *app
-    command: ["sh", "-c", "alembic upgrade head && python -m doctypes.seed"]
+    environment:
+      <<: *app-env
+      DATABASE_URL: postgresql+psycopg://ledgerline:ledgerline@db:5432/ledgerline
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:-ledgerline-app-dev}
+    command:
+      - sh
+      - -c
+      - alembic upgrade head && python -m core.dbroles && python -m doctypes.seed
     restart: "no"
     networks: [backend]
     depends_on:
