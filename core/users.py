@@ -35,7 +35,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from core.config import get_settings
-from core.models import User, UserSession, utcnow
+from core.models import Organisation, User, UserSession, utcnow
 
 log = logging.getLogger("users")
 
@@ -97,6 +97,12 @@ def create(
         raise ValueError("a name is at most 200 characters")
     if session.scalar(select(User).where(User.email == email)) is not None:
         raise ValueError(f"{email} already has an account")
+    organisation = session.get(Organisation, organisation_id)
+    if organisation is None:
+        raise ValueError("no such organisation")
+    if is_staff and not organisation.is_internal:
+        # Staff see every client's documents. Only the team can be that.
+        raise ValueError("only members of the Ledgerline team's organisation can be staff")
     user = User(
         email=email, name=name, role=role, password_hash=hash_password(password),
         organisation_id=organisation_id, is_staff=is_staff,

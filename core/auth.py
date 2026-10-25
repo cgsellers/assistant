@@ -46,7 +46,8 @@ from sqlalchemy.orm import Session
 
 from core.config import get_settings
 from core.db import get_session
-from core.models import ApiKey, utcnow
+from core.models import ApiKey, Organisation, utcnow
+from core.scoping import Scope, set_scope
 
 log = logging.getLogger("auth")
 
@@ -93,6 +94,17 @@ class Principal:
     #: The Ledgerline team, which sees every organisation. Users only; a key
     #: is never staff.
     is_staff: bool = False
+    #: A member of the team's own organisation -- a user or a key. Required
+    #: for the processor API and the admin panel. Not the same as staff: a
+    #: team key may author processors and still sees only the team's documents.
+    is_team: bool = False
+
+    @property
+    def scope(self) -> Scope:
+        """Whose documents this caller's database session may see."""
+        if self.is_staff:
+            return Scope.everyone(self.label)
+        return Scope.of(self.organisation_id, self.label)
 
     @property
     def label(self) -> str:
@@ -105,7 +117,7 @@ class Principal:
 
 #: Auth switched off for local work: everything is allowed, and the lifespan
 #: hook has already warned about it.
-LOCAL = Principal(kind="local", name="local", role=Role.ADMIN, is_staff=True)
+LOCAL = Principal(kind="local", name="local", role=Role.ADMIN, is_staff=True, is_team=True)
 
 #: `last_used_at` is useful for spotting a key nobody uses any more, but
 #: writing it on every request turns every GET into a write, and SQLite
@@ -203,10 +215,22 @@ def require_principal(
     automatically by a browser, so a request carrying one cannot be a forged
     cross-site request -- which is also why only cookie requests are checked
     for a CSRF token.
+
+    It also fixes the request's database session to the caller's scope
+    (core/scoping.py): the same cached session every route of this request
+    receives, so every query a route makes is already limited to whose data
+    the caller may see. A public path sets none, and any query it made for
+    client data would raise rather than return everything.
     """
     if request.url.path in PUBLIC_PATHS:
         return None
 
+    principal = _identify(request, session)
+    set_scope(session, principal.scope)
+    return principal
+
+
+def _identify(request: Request, session: Session) -> Principal:
     if not get_settings().require_auth:
         return LOCAL
 
@@ -215,7 +239,9 @@ def require_principal(
         if key is None:
             raise _refused()
         return Principal(
-            kind="key", name=key.name, role=Role(key.role), organisation_id=key.organisation_id
+            kind="key", name=key.name, role=Role(key.role),
+            organisation_id=key.organisation_id,
+            is_team=_internal(session, key.organisation_id),
         )
 
     from core import users
@@ -234,18 +260,45 @@ def require_principal(
         )
     request.state.user_session = signed_in
     user = signed_in.user
+    is_team = _internal(session, user.organisation_id)
     return Principal(
         kind="user", name=user.email, role=Role(user.role),
-        organisation_id=user.organisation_id, is_staff=user.is_staff,
+        organisation_id=user.organisation_id,
+        # Checked again here, not only when the account was made: staff see
+        # every client's documents, and only the team's own may.
+        is_staff=user.is_staff and is_team,
+        is_team=is_team,
     )
 
 
-def require_role(role: Role):
-    """A dependency that admits callers holding `role` (admins hold every role)."""
+def _internal(session: Session, organisation_id: str) -> bool:
+    organisation = session.get(Organisation, organisation_id)
+    return organisation is not None and organisation.is_internal
 
-    def check(principal: Principal | None = Depends(require_principal)) -> Principal:
-        if principal is None:
-            raise _refused()
+
+def require_team(principal: Principal | None = Depends(require_principal)) -> Principal:
+    """
+    The Ledgerline team only: the processor API and the admin panel. A
+    client's users and keys get a 403 -- the processors are the team's tool,
+    and listing them would show one client another's dedicated processors.
+    """
+    if principal is None:
+        raise _refused()
+    if not principal.is_team:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="this is for the Ledgerline team",
+        )
+    return principal
+
+
+def require_role(role: Role):
+    """
+    A dependency that admits the team's callers holding `role` (admins hold
+    every role). Roles are about processors, which only the team works on.
+    """
+
+    def check(principal: Principal = Depends(require_team)) -> Principal:
         if not principal.may(role):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,

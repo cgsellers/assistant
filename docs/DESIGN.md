@@ -1839,7 +1839,41 @@ Refined when it came to building it:
 - `python -m core.tenancy create "Acme Ltd" acme` makes a client organisation, and
   `--client acme` on `core.users` and `core.auth` gives it a user or a key.
 
-Ownership is only recorded so far: who sees what is still unchanged until 4.2.
+**4.2, scoping in one place.** Every database session carries a scope (`core/scoping.py`):
+one organisation, or every organisation for team staff and the system's own processes
+(the worker, operator commands). A hook on every ORM statement finds each client-data
+table anywhere in it and applies SQLAlchemy's `with_loader_criteria` for the session's
+organisation. That reaches the main query, joins (in the ON clause, so an outer join
+keeps a document with no extraction), subqueries, eager and lazy relationship loads,
+and bulk UPDATE and DELETE. Requests get their scope from their credentials in the
+app-wide auth dependency, so no route sets one and none can forget. Decided along the
+way:
+
+- **It fails closed.** A query for client data from a session with no scope raises
+  `Unscoped` instead of returning everything. Turning it on found three tests setting up
+  data from bare sessions; the worker and `core.costs` now declare `Scope.everyone`.
+- **Detection looks at the whole statement, not the selected entities.** The first
+  version checked only what a query selected, so `count(*) FROM documents` (which
+  selects no entity) and a table only joined through skipped both the filter and the
+  unscoped check, and counted every client's documents. Found by probing those shapes
+  on both databases before relying on it. `tests/test_scoping.py` covers each shape, and
+  three of its tests fail against the first version. Along the way I briefly blamed
+  `with_loader_criteria` and added a statement-rewriting walk on top. Disabling pieces
+  one at a time showed the criteria were sound and the detection was the bug, so the
+  walk, which leaned on SQLAlchemy internals, was removed again.
+- **Another organisation's document is answered exactly as a missing one.** Same
+  status, same body, on every document route (`tests/test_isolation.py`).
+- **"Team" is a property of the organisation** (`organisations.is_internal`, true for
+  Ledgerline demo), separate from staff. The processor API, reads included, and every
+  panel page need a team member: a client's key could otherwise list every processor,
+  including another client's dedicated ones. A client's user who signs in at the panel
+  gets "this sign-in is for the Ledgerline team", and their session is ended at once.
+- **Staff is the team's alone, checked twice:** `users.create` refuses it outside the
+  team's organisation, and every request re-checks it, so a staff flag set on a client's
+  user some other way grants nothing.
+
+What the application layer does not cover is raw SQL, which nothing uses for client data.
+That, and the rule held by the database itself, is step 4.3.
 
 ### 9.2 Why Postgres
 
@@ -2071,6 +2105,11 @@ connect, start with [WALKTHROUGH.md](WALKTHROUGH.md).
   signing out, disabling someone or changing a password has to take effect now. A JWT
   can't be revoked without a denylist, and a denylist puts the database lookup back.
   Server-side sessions give that for one indexed query.
+- **How do you stop one client seeing another's data?** §9.3. A scope on every database
+  session, applied by a hook to every statement, so no route filters and none can forget;
+  a session with no scope raises instead of returning everything. Another client's
+  document is answered exactly like a missing one. From step 4.3, Postgres row-level
+  security underneath, so the database refuses even if the application asks.
 - **You let a model write processors?** §9.1. It drafts data, never code: fields,
   descriptions and keywords, checked by the same validation as a person's work. The
   lessons that matter are enforced in code rather than asked for. It gets one repair

@@ -21,6 +21,7 @@ from __future__ import annotations
 import io
 import os
 from collections.abc import Iterator
+from contextlib import contextmanager
 from decimal import Decimal
 
 import pytest
@@ -111,7 +112,25 @@ def session_factory(db_engine) -> sessionmaker:
 
 @pytest.fixture
 def session(session_factory) -> Iterator[Session]:
+    """
+    Sees every organisation, as the worker does. Tests about who sees what
+    open sessions of their own with narrower scopes; requests made through
+    the API get theirs from their credentials, as in production.
+    """
+    from core.scoping import Scope, set_scope
+
     with session_factory() as s:
+        set_scope(s, Scope.everyone("test"))
+        yield s
+
+
+@contextmanager
+def system_session(factory) -> Iterator[Session]:
+    """A session from `factory` that sees every organisation, as the worker's does."""
+    from core.scoping import Scope, set_scope
+
+    with factory() as s:
+        set_scope(s, Scope.everyone("test"))
         yield s
 
 

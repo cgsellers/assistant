@@ -159,6 +159,12 @@ class Organisation(Base):
     name: Mapped[str] = mapped_column(String(200), unique=True)
     #: Short and stable, for URLs and the command line.
     slug: Mapped[str] = mapped_column(String(60), unique=True, index=True)
+    #: The Ledgerline team's own organisation. Its members -- users and keys --
+    #: may use the processor API and the admin panel; a client's may not. Only
+    #: its users can be staff, who see every organisation's documents.
+    is_internal: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=text("false")
+    )
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
 
 

@@ -17,7 +17,7 @@ from core.costs import cost_report, format_report
 from core.models import Extraction, utcnow
 from llm.base import ExtractionResult
 
-from .conftest import TINY_PNG, demo_org_id
+from .conftest import TINY_PNG, demo_org_id, system_session
 
 
 @pytest.fixture
@@ -196,7 +196,7 @@ class TestEndpoint:
         assert anon_client.get("/costs").status_code == 401
 
     def test_it_reports(self, client, session_factory):
-        with session_factory() as s:
+        with system_session(session_factory) as s:
             document, _ = repository.ingest(
                 s,
                 organisation_id=demo_org_id(s),

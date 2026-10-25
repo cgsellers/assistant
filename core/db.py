@@ -4,6 +4,9 @@ from pathlib import Path
 from sqlalchemy import Engine, create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 
+# Registers the tenancy hook on every session: client data is filtered to the
+# session's scope, and unscoped queries for it raise. See core/scoping.py.
+import core.scoping  # noqa: F401
 from core.config import get_settings
 
 SQLITE_PREFIX = "sqlite:///"

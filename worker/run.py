@@ -27,6 +27,7 @@ from sqlalchemy.orm import Session
 from core import money, repository, storage
 from core.db import SessionLocal
 from core.models import Document, DocumentEvent, Job, OcrResult, utcnow
+from core.scoping import Scope, set_scope
 from core.status import DocStatus, JobKind, JobStatus
 from doctypes import registry
 from doctypes.canonical import derived_columns, to_ledger
@@ -459,6 +460,9 @@ def _default_extractor() -> Extractor:
 def tick(engine: OcrEngine, extractor: Extractor | None = None) -> bool:
     """One unit of work. Returns True if a job was processed."""
     with SessionLocal() as session:
+        # The worker processes every organisation's documents, and says so:
+        # its sessions are the system's own, not any client's.
+        set_scope(session, Scope.everyone("worker"))
         if (returned := reclaim_stale(session)):
             log.info("reclaimed %d stale job(s)", returned)
 

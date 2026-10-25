@@ -8,7 +8,8 @@ processor is edited.
 
 Authentication is the app's, not the panel's: the same app-wide dependency
 that guards the API guards these pages, and a page simply reads the
-principal it produced. Two things differ for a browser:
+principal it produced. Every page needs a member of the Ledgerline team, and
+a client's user cannot sign in here at all. Two things differ for a browser:
 
   * **No credentials means a redirect to the sign-in page**, not a JSON 401.
     `unauthenticated` does that, and only for /panel paths.
@@ -39,8 +40,9 @@ from api.routes.auth import set_session_cookie
 from api.routes.documents import check_upload
 from api.routes.processors import get_drafter, get_extractor, get_ocr_engine
 from core import repository, tenancy, users
-from core.auth import SESSION_COOKIE, Principal, Role, require_principal, require_role
+from core.auth import SESSION_COOKIE, Principal, Role, require_role, require_team
 from core.db import get_session
+from core.models import Organisation
 from doctypes import authoring, results
 from doctypes.authoring import AuthoringError, Conflict, NotFound
 
@@ -145,6 +147,17 @@ def login(
             error="Wrong email or password.", email=email,
             status_code=status.HTTP_401_UNAUTHORIZED,
         )
+    organisation = session.get(Organisation, signed_in.user.organisation_id)
+    if organisation is None or not organisation.is_internal:
+        # A client's user, with the right password. The panel is the team's;
+        # their documents will be in the client portal. Their session ends
+        # here rather than lingering unused.
+        users.sign_out(session, signed_in.session)
+        return _page(
+            request, "login.html", None,
+            error="This sign-in is for the Ledgerline team.", email=email,
+            status_code=status.HTTP_403_FORBIDDEN,
+        )
     response = RedirectResponse("/panel", status.HTTP_303_SEE_OTHER)
     set_session_cookie(response, signed_in.token)
     return response
@@ -168,7 +181,7 @@ def logout(request: Request, session: Session = Depends(get_session)):
 def processors(
     request: Request,
     session: Session = Depends(get_session),
-    principal: Principal = Depends(require_principal),
+    principal: Principal = Depends(require_team),
 ):
     return _page(
         request, "processors.html", principal,
@@ -181,7 +194,7 @@ def history(
     name: str,
     request: Request,
     session: Session = Depends(get_session),
-    principal: Principal = Depends(require_principal),
+    principal: Principal = Depends(require_team),
 ):
     versions = authoring.history(session, name)
     return _page(
@@ -197,7 +210,7 @@ def version(
     version: int,
     request: Request,
     session: Session = Depends(get_session),
-    principal: Principal = Depends(require_principal),
+    principal: Principal = Depends(require_team),
 ):
     row = authoring.get_version(session, name, version)
     versions = authoring.history(session, name)
@@ -215,7 +228,7 @@ def diff(
     b: int,
     request: Request,
     session: Session = Depends(get_session),
-    principal: Principal = Depends(require_principal),
+    principal: Principal = Depends(require_team),
 ):
     older = authoring.get_version(session, name, a)
     newer = authoring.get_version(session, name, b)
@@ -261,7 +274,7 @@ def documents(
     days: str = "",
     before: str = "",
     session: Session = Depends(get_session),
-    principal: Principal = Depends(require_principal),
+    principal: Principal = Depends(require_team),
 ):
     since = None
     if days in SINCE_DAYS:
@@ -295,7 +308,7 @@ def document(
     document_id: str,
     request: Request,
     session: Session = Depends(get_session),
-    principal: Principal = Depends(require_principal),
+    principal: Principal = Depends(require_team),
 ):
     row = repository.get_document(session, document_id)
     if row is None:

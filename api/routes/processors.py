@@ -8,6 +8,9 @@ without the rules moving.
 
 A definition can be sent as JSON (`definition`) or as the seed YAML (`yaml`),
 which is what the panel edits and what a person pastes from a seed file.
+
+The Ledgerline team only, reads included: a client's key gets a 403 here, or
+the list would show one client another's dedicated processors.
 """
 
 from __future__ import annotations
@@ -23,7 +26,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.orm import Session
 
 from api.routes.documents import check_upload
-from core.auth import Principal, Role, require_role
+from core.auth import Principal, Role, require_role, require_team
 from core.db import get_session
 from core.models import DocumentTypeDefinition
 from doctypes import authoring
@@ -206,7 +209,9 @@ def authoring_error(_: Request, exc: AuthoringError) -> JSONResponse:
 
 
 @router.get("", response_model=list[SummaryOut], summary="Every processor and its state")
-def list_processors(session: Session = Depends(get_session)) -> list[SummaryOut]:
+def list_processors(
+    session: Session = Depends(get_session), _: Principal = Depends(require_team)
+) -> list[SummaryOut]:
     return [
         SummaryOut(
             name=s.name,
@@ -221,14 +226,19 @@ def list_processors(session: Session = Depends(get_session)) -> list[SummaryOut]
 
 
 @router.get("/{name}", response_model=list[VersionOut], summary="A processor's versions")
-def history(name: str, session: Session = Depends(get_session)) -> list[VersionOut]:
+def history(
+    name: str, session: Session = Depends(get_session), _: Principal = Depends(require_team)
+) -> list[VersionOut]:
     return [VersionOut.model_validate(r) for r in authoring.history(session, name)]
 
 
 @router.get(
     "/{name}/versions/{version}", response_model=VersionDetail, summary="One version in full"
 )
-def get_version(name: str, version: int, session: Session = Depends(get_session)):
+def get_version(
+    name: str, version: int,
+    session: Session = Depends(get_session), _: Principal = Depends(require_team),
+):
     return _detail(authoring.get_version(session, name, version))
 
 

@@ -28,19 +28,19 @@ def demo_organisation(session: Session) -> Organisation:
     found = by_slug(session, DEMO_SLUG)
     if found is not None:
         return found
-    return create(session, DEMO_NAME, DEMO_SLUG)
+    return create(session, DEMO_NAME, DEMO_SLUG, is_internal=True)
 
 
 def by_slug(session: Session, slug: str) -> Organisation | None:
     return session.scalar(select(Organisation).where(Organisation.slug == slug))
 
 
-def create(session: Session, name: str, slug: str) -> Organisation:
+def create(session: Session, name: str, slug: str, *, is_internal: bool = False) -> Organisation:
     if not _SLUG.match(slug):
         raise ValueError("a slug is 2-60 lowercase letters, digits and hyphens")
     if by_slug(session, slug) is not None:
         raise ValueError(f"an organisation called {slug!r} already exists")
-    organisation = Organisation(name=name.strip(), slug=slug)
+    organisation = Organisation(name=name.strip(), slug=slug, is_internal=is_internal)
     session.add(organisation)
     session.commit()
     return organisation

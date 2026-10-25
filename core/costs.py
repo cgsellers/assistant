@@ -251,8 +251,11 @@ def main() -> None:
     args = parser.parse_args()
 
     from core.db import SessionLocal
+    from core.scoping import Scope, set_scope
 
     with SessionLocal() as session:
+        # An operator's command: every organisation's spend.
+        set_scope(session, Scope.everyone("core.costs"))
         report = cost_report(session, since=args.since, until=args.until)
     print(json.dumps(report.as_dict(), indent=2) if args.json else format_report(report))
 

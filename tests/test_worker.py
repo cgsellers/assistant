@@ -10,7 +10,14 @@ from core.status import DocStatus, JobKind, JobStatus
 from ocr.base import UnsupportedMediaType
 from worker import run as worker
 
-from .conftest import TINY_PNG, FakeEngine, ForbiddenExtractor, demo_org_id, sqlite_only
+from .conftest import (
+    TINY_PNG,
+    FakeEngine,
+    ForbiddenExtractor,
+    demo_org_id,
+    sqlite_only,
+    system_session,
+)
 
 
 def _ingest(session, data=TINY_PNG, name="receipt.png"):
@@ -291,7 +298,7 @@ class TestTick:
         """tick() opens its own session, so the factory is swapped for the sandbox."""
         monkeypatch.setattr(worker, "SessionLocal", session_factory)
 
-        with session_factory() as s:
+        with system_session(session_factory) as s:
             repository.ingest(
                 s,
                 organisation_id=demo_org_id(s),
@@ -306,7 +313,7 @@ class TestTick:
         assert worker.tick(fake_engine, extractor) is True   # extract
         assert worker.tick(fake_engine, extractor) is False  # queue now empty
 
-        with session_factory() as s:
+        with system_session(session_factory) as s:
             assert s.query(OcrResult).count() == 1
             assert {j.status for j in s.query(Job).all()} == {JobStatus.DONE}
             assert {j.kind for j in s.query(Job).all()} == {JobKind.OCR, JobKind.EXTRACT}
@@ -314,7 +321,7 @@ class TestTick:
     def test_rejects_an_unknown_job_kind(self, session_factory, monkeypatch, fake_engine):
         monkeypatch.setattr(worker, "SessionLocal", session_factory)
 
-        with session_factory() as s:
+        with system_session(session_factory) as s:
             document, _ = repository.ingest(
                 s,
                 organisation_id=demo_org_id(s),
@@ -325,7 +332,7 @@ class TestTick:
             s.commit()
 
         assert worker.tick(fake_engine) is True
-        with session_factory() as s:
+        with system_session(session_factory) as s:
             job = s.query(Job).one()
             assert job.status == JobStatus.FAILED
             assert "teleport" in job.last_error
