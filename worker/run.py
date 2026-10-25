@@ -42,6 +42,7 @@ from ocr.layout import blocks_from_json, extraction_text
 log = logging.getLogger("worker")
 
 POLL_SECONDS = 2.0
+MIGRATION_POLL_SECONDS = 5.0
 # A job locked longer than this is presumed abandoned by a dead worker.
 STALE_AFTER = timedelta(minutes=15)
 # Retry backoff: attempt 1 waits 4s, attempt 2 waits 16s, attempt 3 waits 64s.
@@ -475,6 +476,22 @@ def tick(engine: OcrEngine, extractor: Extractor | None = None) -> bool:
         return True
 
 
+def wait_for_migrations(poll_seconds: float = MIGRATION_POLL_SECONDS) -> None:
+    """
+    Take no job until the database is at the migration this code expects.
+
+    A worker that starts before a deploy's migration has run would claim jobs
+    against the old schema and fail them, using up their retries on a problem
+    that fixes itself a minute later. Waiting costs nothing.
+    """
+    from core import migrations
+    from core.db import engine as db_engine
+
+    while (reason := migrations.problem(db_engine)) is not None:
+        log.warning("waiting: %s", reason)
+        time.sleep(poll_seconds)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Ledgerline job worker")
     parser.add_argument("--once", action="store_true", help="drain the queue and exit")
@@ -489,6 +506,7 @@ def main() -> None:
     )
     engine = get_engine(args.engine)
     log.info("worker %s starting with engine=%s", worker_id(), engine.name)
+    wait_for_migrations()
 
     while True:
         worked = tick(engine)

@@ -3,12 +3,14 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from api.routes import auth, costs, documents, processors
+from core import migrations
 from core.auth import require_principal
 from core.config import get_settings
 from core.db import get_session
@@ -63,5 +65,22 @@ app.add_exception_handler(AuthoringError, _authoring_error)
 
 @app.get("/health")
 def health(session: Session = Depends(get_session)) -> dict[str, str]:
+    """Liveness: the process is up and the database answers. Nothing more."""
     session.execute(text("SELECT 1"))
     return {"status": "ok", "db": "ok"}
+
+
+@app.get("/ready")
+def ready(session: Session = Depends(get_session)) -> JSONResponse:
+    """
+    Readiness: the database is at the migration this code expects.
+
+    The check `/health` cannot make. An empty or half-migrated database
+    passes `/health`, and then every real request fails (DESIGN §8.2), so a
+    load balancer or orchestrator should route traffic on this one. 503 with
+    the reason until the schema matches.
+    """
+    reason = migrations.problem(session.get_bind())
+    if reason is not None:
+        return JSONResponse({"status": "not ready", "reason": reason}, status_code=503)
+    return JSONResponse({"status": "ready", "revision": migrations.expected_revision()})

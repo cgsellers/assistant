@@ -416,8 +416,9 @@ make an exception for `localhost`; Safari may not, which looks like signing in a
 back on the form. For plain-http local work, add `SESSION_COOKIE_SECURE=false` to `.env`
 and restart. Never in a deployment.
 
-To run on Postgres instead, start it with `docker compose up -d db` and use the
-`DATABASE_URL` shown in `.env.example`. The test suite runs on either: it uses SQLite
+`docker compose --profile dev up -d` starts Postgres and the OCR container for this
+workflow. To run on Postgres rather than SQLite, use the `DATABASE_URL` shown in
+`.env.example`. The test suite runs on either: it uses SQLite
 unless `TEST_DATABASE_URL` points it at Postgres (create the database first with
 `docker exec ledgerline-db createdb -U ledgerline ledgerline_test`).
 
@@ -425,7 +426,7 @@ Lint and tests:
 
 ```bash
 uv run ruff check .
-uv run pytest              # ~920 tests, ~15s; no container, tesseract, network or API key
+uv run pytest              # ~930 tests, ~15s; no container, tesseract, network or API key
 ```
 
 Measuring extraction against a labelled corpus:
@@ -446,6 +447,22 @@ uv run python -m core.costs --since 2026-10-01     # or GET /costs
 Drafts are written `verified: false` and the runner will not score them until a human
 has checked each field against the document and said otherwise.
 
-Full `docker compose up` instructions land with the OCR container, later in phase 1.
+### Everything in containers
+
+The deployment shape, on one machine:
+
+```bash
+docker compose --profile app up -d --build
+docker compose --profile app run --rm api python -m core.auth create "me" --role admin
+docker compose --profile app run --rm api python -m core.users create you@example.com --role admin
+# the API and panel on http://localhost:8080; readiness at /ready
+```
+
+A one-off `migrate` service runs the migrations and creates the starter processors, and
+the API and worker start only once it has succeeded, from the same image. The worker
+also waits for the schema itself, so a worker started early never runs against an old
+one. The OCR container sits on a Docker network with no route out: it can reach neither
+the internet nor the database, which the full stack was checked for. `/health` is
+liveness; `/ready` answers 503 until the database is at the migration the code expects.
 
 ---

@@ -442,7 +442,7 @@ def draft_labels(
             raise CorpusError(
                 f"OCR failed on {path.name}: {exc}\n"
                 "If the OCR container is not running, start it with:\n"
-                "  docker compose up -d ocr"
+                "  docker compose --profile dev up -d"
             ) from exc
         text = extraction_text(output.full_text, output.blocks)
         match = registry.route(session, text)

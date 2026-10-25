@@ -1496,7 +1496,13 @@ by hand via the endpoint, not by pytest). Phase 2 added 219 tests of its own —
 taking the suite to **347 in 1.7s**, still with no container, binary, network or API key
 required.
 
-**8.2 `/health` is liveness only.** It runs `SELECT 1`, which succeeds against any
+**8.2 ~~`/health` is liveness only~~ — resolved in step 2.** `/ready` compares the
+database's `alembic_version` with the newest migration shipped beside the code, and
+answers 503 with the reason until they match. The compose API's healthcheck uses it, and
+the worker waits on the same check before taking a job. `/health` stays liveness:
+something to restart on, not to route on. What follows is the gap as it was found.
+
+`/health` runs `SELECT 1`, which succeeds against any
 openable database — including one with zero tables. Demonstrated by rolling the migration
 back to `base` and observing `200 {"status":"ok","db":"ok"}` against an empty schema. The
 failure mode it cannot catch: deploy new code, forget to migrate, container reports
@@ -1518,9 +1524,10 @@ schema cannot produce.
 `pypdfium2` at 200 DPI, capped at 20 pages. Tesseract still refuses PDFs by design, since
 it has no rasteriser and should not guess; that path is now only used for tests.
 
-**8.5 ~~No Docker Compose~~ — partially resolved.** `docker-compose.yml` runs the OCR
-sidecar. The API and worker are still run with `uv run` so `--reload` and breakpoints
-work; they join compose when there is a deployment target to match.
+**8.5 ~~No Docker Compose~~ — resolved in step 2.** Two profiles. `dev` starts Postgres
+and the OCR container for the `uv run` workflow. `app` runs everything from one image:
+a `migrate` step (migrations, then the create-only seed) that the API and worker wait
+on, then both. See §9.2.
 
 **8.6 Content-level deduplication is unsolved.** `sha256` catches "you sent me this exact
 file again." It does not catch "this is the same receipt." A user who photographs a
@@ -1813,6 +1820,31 @@ every table truncated between tests. Running it found four things SQLite had hid
   then the UPDATE, in one transaction, so ten workers polling at once take ten different
   jobs. The engine also checks pooled connections on checkout (`pool_pre_ping`),
   because a worker keeps its pool for days and the database drops idle connections.
+
+**Then all of it in containers (step 2.3).** One app image serves the API, the worker
+and a one-off `migrate` step. It is two-stage, so the runtime has the locked
+dependencies but no installer (414 MB, down from 636). It runs as a non-root user, and
+the root `.dockerignore` keeps `.env` and `data/` out of it. Compose starts Postgres,
+then `migrate`, and only once that succeeds the API (whose healthcheck is `/ready`) and
+the worker (which also waits on the schema itself).
+
+The OCR container went from "holds no credentials" in a comment to isolated by
+construction, on a Docker network marked `internal`. Checked from inside it:
+- `db` doesn't resolve;
+- the database's IP is "network unreachable";
+- the internet doesn't resolve;
+- the worker still reaches it.
+
+Two qualifications. Publishing a port needs a network with a way out, so the `dev`
+profile's OCR, which `uv run` reaches on localhost, is not isolated: it is the
+development shape only. And the API is on the OCR network, because panel trial uploads
+call OCR. A compromised OCR container could therefore reach the API, but only its
+public routes (health, readiness, sign-in, which locks after ten failures).
+
+Checked end to end in the containers: a born-digital invoice uploaded to the API was
+read by the isolated OCR from its text layer, routed to `invoice` and extracted for
+$0.0034. Its missing total was derived by the transform as 107.99, and it was committed
+with `derived: ["amount"]`.
 
 ---
 

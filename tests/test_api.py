@@ -214,6 +214,7 @@ class TestOpenApi:
             "/documents/{document_id}/ocr",
             "/costs",
             "/health",
+            "/ready",
             "/auth/login",
             "/auth/logout",
             "/auth/me",
