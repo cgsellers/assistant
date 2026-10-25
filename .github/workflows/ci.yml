@@ -15,6 +15,12 @@ on:
 permissions:
   contents: read
 
+# Actions are pinned to commit SHAs, not tags. A tag can be moved to other
+# code -- by its owner, or by whoever takes over their account -- and a
+# workflow that follows it runs whatever it now points at. The comment beside
+# each pin says which release it is, for whoever updates it. The runner image
+# is named for the same reason: `ubuntu-latest` changes underneath you.
+
 # A newer push to the same branch makes an older run's answer irrelevant.
 concurrency:
   group: ci-${{ github.ref }}
@@ -25,10 +31,10 @@ env:
 
 jobs:
   lint:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e  # v10.3.2
         with:
           version: ${{ env.UV_VERSION }}
           enable-cache: true
@@ -37,10 +43,10 @@ jobs:
 
   test-sqlite:
     # The default: a fresh SQLite file per test, no service to start.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e  # v10.3.2
         with:
           version: ${{ env.UV_VERSION }}
           enable-cache: true
@@ -59,7 +65,7 @@ jobs:
     # The deployment database. It enforces column lengths, stores real
     # timestamps, sorts JSONB keys and takes row locks -- each of which hid a
     # bug from the SQLite run (DESIGN §9.2), so both always run.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     services:
       postgres:
         image: postgres:17
@@ -77,8 +83,8 @@ jobs:
     env:
       TEST_DATABASE_URL: postgresql+psycopg://ledgerline:ledgerline@localhost:5432/ledgerline_test
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e  # v10.3.2
         with:
           version: ${{ env.UV_VERSION }}
           enable-cache: true
@@ -98,9 +104,9 @@ jobs:
           uv run alembic upgrade head
 
   images:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - name: Build the app image
         run: docker build -t ledgerline-app:ci -f Dockerfile .
       - name: Build the OCR image
