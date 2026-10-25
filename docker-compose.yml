@@ -24,7 +24,11 @@ services:
     restart: unless-stopped
 
   ocr:
-    build: ./services/ocr_service
+    # Built from the repo root so it can take ocr/pdftext.py; the root
+    # .dockerignore keeps .env and data/ out of the build context.
+    build:
+      context: .
+      dockerfile: services/ocr_service/Dockerfile
     image: ledgerline-ocr:dev
     container_name: ledgerline-ocr
     ports:

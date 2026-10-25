@@ -22,12 +22,15 @@ def get_engine(name: str | None = None) -> OcrEngine:
 
     name = (name or get_settings().ocr_engine).lower()
 
-    # Every engine is wrapped: a PDF that already carries its text is read
-    # directly, and only images and scans reach the OCR engine underneath.
+    # PP-OCR is not wrapped: the container reads a PDF's text layer itself,
+    # so untrusted PDFs are parsed only there, where there are no credentials
+    # (DESIGN §8.9). Tesseract runs in this process and parses its images
+    # here anyway -- it is the test double, never the production path -- so
+    # it reads text layers in-process too.
     if name == "ppocr":
         from ocr.ppocr import PpOcrEngine
 
-        return TextLayerFirst(PpOcrEngine())
+        return PpOcrEngine()
     if name == "tesseract":
         from ocr.tesseract import TesseractEngine
 

@@ -7,6 +7,12 @@ heavy native dependency out of the main application, and it is the process that
 parses untrusted uploaded files, so it gets no database credentials and no
 outbound network access.
 
+A PDF's own text layer is read here first (ocr/pdftext.py, shared with the
+pipeline), and only a PDF without one is rasterised and recognised. Reading
+the layer used to happen in the worker -- which held the database password --
+so the one guarantee this container exists for had quietly stopped holding
+for born-digital PDFs (DESIGN §8.9).
+
 The main app talks to this through ocr/ppocr.py, which implements the
 OcrEngine protocol. Nothing else in the pipeline knows this service exists.
 """
@@ -23,6 +29,8 @@ from contextlib import asynccontextmanager
 import pypdfium2 as pdfium
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile, status
 from rapidocr import RapidOCR
+
+from ocr.pdftext import read_text_layer
 
 log = logging.getLogger("ocr_service")
 
@@ -123,6 +131,33 @@ def _pdf_to_pages(data: bytes, dpi: int) -> Iterator[bytes]:
         document.close()
 
 
+def _text_layer(data: bytes) -> dict | None:
+    """
+    The PDF's embedded text, in this service's response shape, or None when
+    it has too little to trust (a scan) or more pages than the limit -- which
+    then reaches the rasteriser and its 413, exactly as before.
+    """
+    try:
+        output = read_text_layer(data)
+    except pdfium.PdfiumError:
+        # Malformed or encrypted: the rasteriser gets it and rejects it.
+        return None
+    if output is None:
+        return None
+    return {
+        "engine": output.engine,
+        "engine_version": output.engine_version,
+        "params": output.params,
+        "full_text": output.full_text,
+        "blocks": [
+            {"text": b.text, "bbox": list(b.bbox), "confidence": None, "page": b.page}
+            for b in output.blocks
+        ],
+        "mean_confidence": None,
+        "pages": max((b.page for b in output.blocks), default=0),
+    }
+
+
 @app.get("/health")
 def health() -> dict:
     """
@@ -158,6 +193,9 @@ async def ocr(
 
     started = time.perf_counter()
     if content_type == PDF_TYPE:
+        layer = _text_layer(data)
+        if layer is not None:
+            return {**layer, "elapsed_seconds": round(time.perf_counter() - started, 3)}
         blocks = [
             block
             for page_number, png in enumerate(_pdf_to_pages(data, dpi), start=1)

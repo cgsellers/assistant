@@ -97,9 +97,11 @@ class TextLayerFirst:
     """
     An OcrEngine that tries a PDF's text layer before the real engine.
 
-    A wrapper rather than a branch in the worker, so the eval harness and
-    the pipeline go through the same decision and cannot disagree about
-    which documents were OCRed.
+    For engines that run in this process -- Tesseract, the test double. The
+    production engine does not use it: the OCR container runs
+    `read_text_layer` itself, so that untrusted PDFs are parsed only where
+    there are no credentials. Same function either way, so the two paths
+    cannot disagree about which documents had a text layer.
     """
 
     def __init__(self, fallback: OcrEngine):

@@ -1,0 +1,22 @@
+# Images are built from the repo root so they can share code (the OCR image
+# takes ocr/pdftext.py, for one). That makes everything here part of the build
+# context unless excluded -- and some of it must never reach an image.
+
+# Secrets and private data. .env holds the API key; data/ holds real receipts
+# and invoices, the database and the eval corpus.
+.env
+.env.*
+!.env.example
+data/
+*.db
+*.db-*
+
+# Local tooling and caches: large, and nothing an image needs.
+.git/
+.venv/
+**/__pycache__/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.idea/
+.vscode/

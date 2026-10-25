@@ -378,7 +378,7 @@ before/after numbers rather than asserted.
 - **Tooling:** uv for dependencies and virtualenv, ruff for lint and format, pytest
 - **DB:** Postgres 17; SQLite (WAL mode) for zero-setup local work and the fast test run. The suite runs on both
 - **Queue:** DB-backed `jobs` table polled by a worker (Redis later if needed)
-- **OCR:** self-hosted, behind an `OcrEngine` protocol, in its own container (PP-OCR models on ONNX Runtime; Tesseract as test double). Born-digital PDFs skip it: their embedded text layer is read directly, exactly, in milliseconds
+- **OCR:** self-hosted, behind an `OcrEngine` protocol, in its own container (PP-OCR models on ONNX Runtime; Tesseract as test double). Born-digital PDFs skip recognition: the container reads their embedded text layer, exactly, in milliseconds, so untrusted files are only ever parsed where there are no credentials
 - **Models:** Anthropic API behind an `Extractor` protocol, using structured outputs; cheap tier for extraction, strong tier for fallback and analysis
 - **Orchestration:** LangGraph, if the template agent's loop earns it (roadmap step 5)
 - **Infra:** Docker Compose

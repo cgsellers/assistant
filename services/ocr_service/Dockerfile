@@ -1,3 +1,7 @@
+# Built from the repository root (see docker-compose.yml), so the PDF
+# text-layer reader can be shared with the pipeline instead of copied. The
+# root .dockerignore keeps .env and data/ out of the build context.
+#
 # Native arm64 -- no --platform flag, so this builds for whatever the host is.
 FROM python:3.12-slim
 
@@ -14,10 +18,14 @@ WORKDIR /srv
 # Copy requirements alone first. Docker caches each step, and this one is the
 # slow part -- as long as requirements.txt is unchanged, editing app.py below
 # reuses the cached install instead of redownloading everything.
-COPY requirements.txt .
+COPY services/ocr_service/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY app.py .
+# The text-layer reader, shared with the pipeline so the two cannot drift
+# apart. These three files and nothing else: the parser of untrusted uploads
+# gets no other application code, and none of its configuration.
+COPY ocr/__init__.py ocr/base.py ocr/pdftext.py ./ocr/
+COPY services/ocr_service/app.py .
 
 EXPOSE 8001
 CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8001"]

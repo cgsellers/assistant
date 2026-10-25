@@ -46,11 +46,52 @@ class TestProtocolConformance:
 
 class TestGetEngine:
     def test_returns_ppocr_by_default(self, settings):
-        assert get_engine().fallback.name == "ppocr-onnx"
+        assert get_engine().name == "ppocr-onnx"
 
     def test_can_be_overridden_by_name(self, settings):
         assert get_engine("tesseract").fallback.name == "tesseract"
-        assert get_engine("PPOCR").fallback.name == "ppocr-onnx"  # case-insensitive
+        assert get_engine("PPOCR").name == "ppocr-onnx"  # case-insensitive
+
+    def test_the_production_engine_parses_no_pdf_in_this_process(self, settings, monkeypatch):
+        """
+        DESIGN §8.9: untrusted PDFs are parsed only in the OCR container, where
+        there are no credentials. Reading the text layer here -- the worker,
+        the web server -- would put a PDFium bug beside the database password.
+        """
+        import httpx
+
+        import ocr.pdftext
+        import ocr.ppocr
+
+        def forbidden(*_):
+            raise AssertionError("a PDF was parsed in-process")
+
+        sent = []
+
+        def container(url, *, files, timeout):
+            sent.append(files["file"][2])
+            # What the container answers for a born-digital PDF.
+            return httpx.Response(200, json={
+                "engine": "pdf-text", "full_text": "INVOICE 2041",
+                "blocks": [{"text": "INVOICE 2041", "bbox": [0, 0, 10, 2],
+                            "confidence": None, "page": 1}],
+                "mean_confidence": None, "pages": 1,
+            })
+
+        monkeypatch.setattr(ocr.pdftext, "read_text_layer", forbidden)
+        monkeypatch.setattr(ocr.ppocr.httpx, "post", container)
+
+        output = get_engine("ppocr").read(b"%PDF-1.4 ...", "application/pdf")
+
+        assert sent == ["application/pdf"]
+        assert output.engine == "pdf-text"
+        assert output.blocks[0].confidence is None
+
+    def test_the_in_process_test_double_still_reads_text_layers(self, settings):
+        """Tesseract parses its images in this process anyway; it is never production."""
+        from ocr.pdftext import TextLayerFirst
+
+        assert isinstance(get_engine("tesseract"), TextLayerFirst)
 
     def test_rejects_an_unknown_engine(self, settings):
         with pytest.raises(ValueError, match="unknown ocr engine"):

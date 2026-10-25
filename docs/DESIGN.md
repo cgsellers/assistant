@@ -1317,10 +1317,12 @@ needs. Coordinates are converted to the top-left origin every other engine uses.
 A PDF with fewer than 20 non-space characters (a scan, an image-only export) falls
 back to OCR, as does a malformed one.
 
-It's a wrapper, `TextLayerFirst`, applied inside `get_engine`, so the worker and the
-eval harness take the same decision and can't disagree about which documents were
-OCRed. `ocr_results.engine` records which reader actually ran: `pdf-text` or
-`ppocr-onnx`.
+It was a wrapper, `TextLayerFirst`, applied inside `get_engine`, so the worker and
+the eval harness take the same decision and can't disagree about which documents were
+OCRed. That put PDF parsing in the worker, which §8.9 records and step 2 fixed: the OCR
+container now runs the same `read_text_layer` itself, and the wrapper is left only on
+the in-process test double. `ocr_results.engine` records which reader actually ran:
+`pdf-text` or `ppocr-onnx`.
 
 Measured on a generated two-column invoice: **18 ms against 1.7 s** for the OCR
 container, the same 18 fragments, and correct rows from both. That PDF is clean vector
@@ -1541,7 +1543,15 @@ type-checked, paths are derived from content hashes rather than user-supplied fi
 rate limiting. And the key buys authentication only: nothing in the schema has an owner,
 so any caller that gets in sees everything.
 
-**8.9 Untrusted PDFs are parsed outside the OCR container.** The argument for the
+**8.9 ~~Untrusted PDFs are parsed outside the OCR container~~ — resolved in step 2.**
+The OCR container now reads the text layer itself, as the first step of `/ocr` for a PDF.
+It runs the same `ocr/pdftext.py`, copied into the image rather than re-written, so the
+two paths can't disagree. The production engine no longer touches a PDF in-process, and
+a test makes any in-process parse fail. Building the image from the repo root needed a
+`.dockerignore`, which keeps `.env` and `data/` out of every build context. What follows
+is the gap as it was found.
+
+The argument for the
 container (§5.16) is that files from strangers are parsed only where there are no
 credentials and no network. Reading the PDF text layer (§7.11) broke that quietly. It
 runs PDFium in the worker, which holds the database credentials, and since the panel's
