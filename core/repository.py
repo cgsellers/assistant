@@ -324,6 +324,27 @@ def record_transaction(
     return transaction
 
 
+def current_extraction(session: Session, document_id: str) -> Extraction | None:
+    """The extraction that counts for this document: never a trial, never a failed attempt."""
+    return session.scalar(
+        select(Extraction).where(
+            Extraction.document_id == document_id,
+            Extraction.is_current.is_(True),
+        )
+    )
+
+
+def get_document_type_version(
+    session: Session, name: str, version: int
+) -> DocumentTypeDefinition | None:
+    return session.scalar(
+        select(DocumentTypeDefinition).where(
+            DocumentTypeDefinition.name == name,
+            DocumentTypeDefinition.version == version,
+        )
+    )
+
+
 def current_transaction(session: Session, document_id: str) -> Transaction | None:
     """The ledger row that counts for this document, if it has reached one."""
     return session.scalar(

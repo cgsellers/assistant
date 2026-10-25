@@ -212,6 +212,7 @@ class TestOpenApi:
             "/documents/base64",
             "/documents/{document_id}",
             "/documents/{document_id}/ocr",
+            "/documents/{document_id}/result",
             "/costs",
             "/health",
             "/ready",

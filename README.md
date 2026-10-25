@@ -115,6 +115,17 @@ stateDiagram-v2
 
 `reprocessing` exists because schemas change and historical documents get re-run from stored OCR text — no re-upload, no re-OCR. `committed` and `synced` are separate because third-party delivery fails independently and must retry without touching the ledger.
 
+**What a client system gets back.** `GET /documents/{id}/result` is the import side: an
+ERP uploads a PDF, then polls this until `outcome` is no longer `processing`.
+
+| Field | |
+|---|---|
+| `outcome` | `processing`, `done`, `needs_review`, `unsupported` or `failed`: the states a client branches on, mapped from the internal ones |
+| `data` | every field the processor declares, normalised: `"7.15"` however the page printed it, dates as `YYYY-MM-DD`, `null` for what the document didn't carry. After the transform |
+| `read`, `derived` | what the model read, and which fields the transform worked out, so a printed value can be told from a computed one |
+| `problems` | why a document is waiting for review. `data` is still returned |
+| `processor`, `transaction` | the processor version that read it, and the ledger row it became |
+
 ## Data model
 
 Three layers. Raw is immutable evidence. Typed is the extracted JSON, shaped by a document type. Canonical is the only thing the analyst reads.

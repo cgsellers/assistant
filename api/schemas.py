@@ -9,6 +9,7 @@ contract. `from_attributes` lets Pydantic build them straight from ORM objects.
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -70,3 +71,47 @@ class DocumentDetail(DocumentOut):
     """A document plus its audit trail."""
 
     events: list[DocumentEventOut] = []
+
+
+class ProcessorRef(BaseModel):
+    name: str
+    version: int
+    profile: str | None
+
+
+class LedgerRowOut(BaseModel):
+    id: str
+    direction: str
+    amount: str
+    tax_amount: str | None
+    currency: str | None
+    occurred_on: str | None
+    counterparty: str | None
+    counterparty_tax_id: str | None
+    #: Ledger columns a transform worked out rather than read off the page.
+    derived: list[str]
+
+
+class ResultOut(BaseModel):
+    """
+    A document's result, for a client system to import. See doctypes/results.py.
+
+    Poll until `outcome` is not "processing". "done" means every rule passed;
+    "needs_review" still carries `data`, with `problems` saying what failed.
+    """
+
+    document_id: str
+    #: The internal status, for support. Branch on `outcome` instead.
+    status: str
+    outcome: Literal["processing", "done", "needs_review", "unsupported", "failed"]
+    processor: ProcessorRef | None
+    #: Every field the processor declares, normalised: money as "7.15", dates
+    #: as YYYY-MM-DD, null where the document did not say. After the transform.
+    data: dict | None
+    #: What the model read, before the transform -- the evidence.
+    read: dict | None
+    #: Fields in `data` the transform worked out rather than read.
+    derived: list[str]
+    problems: list[str]
+    transaction: LedgerRowOut | None
+    extracted_at: str | None

@@ -8,10 +8,11 @@ from base64 import b64decode
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from sqlalchemy.orm import Session
 
-from api.schemas import Base64Upload, DocumentDetail, DocumentOut, OcrResultOut
+from api.schemas import Base64Upload, DocumentDetail, DocumentOut, OcrResultOut, ResultOut
 from core import repository, storage
 from core.config import get_settings
 from core.db import get_session
+from doctypes.results import document_result
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
@@ -118,6 +119,25 @@ def get_ocr(
     out.block_count = len(result.layout_blocks or [])
     out.layout_blocks = result.layout_blocks if include_blocks else None
     return out
+
+
+@router.get(
+    "/{document_id}/result",
+    response_model=ResultOut,
+    summary="Get a document's extracted data",
+)
+def get_result(document_id: str, session: Session = Depends(get_session)) -> ResultOut:
+    """
+    What a client system imports: the extracted fields, normalised, with what
+    was read, what was worked out, what failed review, and the ledger row.
+
+    Answers 200 in every state -- poll until `outcome` is not "processing".
+    Only an unknown document is a 404.
+    """
+    document = repository.get_document(session, document_id)
+    if document is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No such document")
+    return ResultOut.model_validate(document_result(session, document))
 
 
 @router.get("/{document_id}", response_model=DocumentDetail, summary="Get a document")

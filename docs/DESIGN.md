@@ -1846,6 +1846,23 @@ read by the isolated OCR from its text layer, routed to `invoice` and extracted 
 $0.0034. Its missing total was derived by the transform as 107.99, and it was committed
 with `derived: ["amount"]`.
 
+**Then the result endpoint (step 2.4).** `GET /documents/{id}/result` is what a client
+system imports, and the one piece of the ERP direction (§9) pulled forward, because
+without it nothing could get a result out through the API at all. Decided:
+
+- **One `outcome` word** for a client to branch on: `processing`, `done`, `needs_review`,
+  `unsupported` or `failed`. Every `DocStatus` maps to one, and a test fails if a status is
+  added without a decision.
+- **`data` is coerced against the version that read the document**, not the live one,
+  which may declare different fields by now. Every declared field is present, null where
+  absent, and money and dates are in one spelling. The transform's output is used where
+  there is one, and `read` and `derived` sit beside it.
+- **Review doesn't hide data.** A `needs_review` result carries the data and the
+  problems; whether a flagged total is usable is the client's call.
+- **Trials and failed attempts never appear.** Only the current extraction counts.
+
+Webhooks, per-client field names and the mapping tool stay deferred (§9).
+
 ---
 
 ## 10. Reproducing the verification
