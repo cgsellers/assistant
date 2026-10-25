@@ -367,18 +367,22 @@ short of the ledger, which is right for one an analyst is still shaping.
 
 **Shipped:** ingestion and OCR (phase 1); processors as data, with routing, extraction,
 validation, transforms and the ledger (2); the eval harness with a held-out set (3); the
-`invoice` type and PDF text layers (part of 4); the analyst agent (7).
+`invoice` type and PDF text layers (part of 4); the analyst agent (7); processor
+authoring with a panel, users, roles and Draft with AI (step 1); Postgres, containers
+with isolated OCR, readiness checks, the result endpoint and CI (step 2, all but hosting).
 
-**Next, in order** (reordered after phases 1–3 and 7 shipped; [DESIGN §9](docs/DESIGN.md)):
+**Next, in order** ([DESIGN §9](docs/DESIGN.md)):
 
 | Step | Ships | Demonstrates |
 |---|---|---|
-| 1 | Processor authoring: API, panel, user accounts, trial runs, versions, publish and retire | Self-serve document types |
-| 2 | Deployable: Postgres, compose, readiness check, a hosted demo on synthetic data | Production shape, early |
-| 3 | Review queue and corrections; corrections become eval labels; duplicate detection; reprocessing | Human in the loop |
-| 4 | Model classifier when no keyword matches; vision fallback; each tier's share, accuracy and cost measured | Cost engineering |
-| 5 | Template agent drafting processors through the authoring API, scored on a fresh holdout; LangGraph only if its loop needs it | Agents, measured |
-| 6 | Outbox, CSV export, an accounting API sandbox; per-document traces; rate limiting; PII redaction | Production shape |
+| 3 | Admin Documents page: each document's original, timeline, result and cost | Operability |
+| 4 | Tenancy: organisations, scoping in one place, row-level security, per-client dedup ([§9.3](docs/DESIGN.md)) | Multi-tenancy done structurally |
+| 5 | Client portal: each client sees only their own documents and results | The product's outside |
+| 6 | Hosted demo on synthetic data | Production shape |
+| 7 | Review queue and corrections; corrections become eval labels; duplicate detection; reprocessing | Human in the loop |
+| 8 | Model classifier when no keyword matches; vision fallback; each tier's share, accuracy and cost measured | Cost engineering |
+| 9 | Template agent drafting processors through the authoring API, scored on a fresh holdout; LangGraph only if its loop needs it | Agents, measured |
+| 10 | Webhooks, per-client field names, CSV and accounting exports; per-document traces; rate limiting; PII redaction | Production shape |
 
 The eval harness came before any orchestration, so every later step is argued with
 before/after numbers rather than asserted.

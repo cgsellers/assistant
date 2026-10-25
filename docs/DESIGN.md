@@ -1583,18 +1583,26 @@ kept in brackets, so earlier sections that say "phase 6" still point somewhere.
 | 3 | Eval harness: per-field accuracy, cost per document, a held-out set (§7.14) |
 | 4, in part | The `invoice` type; born-digital PDFs read from their text layer (§7.11) |
 | 7 | Analyst agent over `transactions`: read-only tools, citations, approval gate |
+| Step 1 | Processor authoring: API, panel, users and roles, trial runs, versions, publish and retire, Draft with AI (§9.1) |
+| Step 2, all but hosting | Postgres; compose with an isolated OCR container; `/ready`; the result endpoint; CI on both databases (§9.2) |
 
-**Next, in order**
+**Next, in order** (reordered again on 2026-10-25)
 
 | Step | Ships | Done when | Demonstrates |
 |---|---|---|---|
-| **1** (phase 6a) | Processor authoring: API, panel, user accounts, trial runs, versions, publish and retire (§9.1) | A new layout gets a published processor without anyone touching YAML | Self-serve document types; auth for people |
-| **2** | Deployable: Postgres, compose for every service, a readiness check, a hosted demo on synthetic data (§9.2) | A public URL, and the suite passing on Postgres in CI | Production shape, early |
-| 3 (phase 4) | Review queue and corrections; corrections become eval labels; probable-duplicate detection (§8.6); reprocessing after a publish | No document sits in review without a way to fix it | Human in the loop; labels from use |
-| 4 (phase 4) | A model classifier when no keyword matches; vision fallback for photos that fail their rules; each tier measured | A table of share, accuracy and cost per tier | Cost engineering |
-| 5 (phases 5, 6b) | A template agent that drafts processors through the authoring API, scored on a fresh holdout. LangGraph only if the draft → trial → revise loop needs it | An agent-drafted processor reaches a stated accuracy on unseen layouts and is published after review | Agents, measured; orchestration where justified |
-| 6 (phase 8) | Outbox with CSV export, then an accounting API sandbox; per-document traces; rate limiting; PII redaction before analyst context | Exports retry safely; every model call on a document is visible | Production shape |
+| **3** | Admin Documents page: every document with its original file, a timeline of its stages (every routing score, durations), its result and cost; filters by outcome, processor and date | Any document's journey is answerable from one page | Operability |
+| **4** | Tenancy: organisations own documents, keys and users; scoping in one place; Postgres row-level security behind it; duplicates detected per organisation; shared and client-specific processors (§9.3) | A second organisation can see nothing of the first, and tests on every endpoint prove it | Multi-tenancy done structurally |
+| 5 | Client portal: each client's staff see only their documents and results, upload, download, and manage their ERP's API key | A client signs in and sees only their own | The product's outside |
+| 6 | Hosted demo on synthetic data (moved out of step 2) | A public URL | Production shape |
+| 7 (phase 4) | Review queue and corrections; corrections become eval labels; probable-duplicate detection (§8.6); reprocessing after a publish | No document sits in review without a way to fix it | Human in the loop; labels from use |
+| 8 (phase 4) | A model classifier when no keyword matches; vision fallback for photos that fail their rules; each tier measured | A table of share, accuracy and cost per tier | Cost engineering |
+| 9 (phases 5, 6b) | A template agent that drafts processors through the authoring API, scored on a fresh holdout. LangGraph only if the draft → trial → revise loop needs it | An agent-drafted processor reaches a stated accuracy on unseen layouts and is published after review | Agents, measured; orchestration where justified |
+| 10 (phase 8) | Webhooks and per-client output field names; outbox with CSV export, then an accounting API sandbox; per-document traces; rate limiting; PII redaction before analyst context | Exports retry safely; every model call on a document is visible | Production shape |
 | Stretch (phase 6) | Generated deterministic parsers for recurring born-digital vendors, in a real sandbox | | Removing the model from the hot path |
+
+**Parked, not dropped:** the visual mapping tool for building a processor's fields as a
+tree (the YAML editor stands in); a code editor in the panel instead of text areas; and
+scoring a draft against the eval corpus before publishing it (`evals.run --version`).
 
 **Why this order.**
 
@@ -1603,6 +1611,11 @@ kept in brackets, so earlier sections that say "phase 6" still point somewhere.
   is built on SQLite, and a live demo is worth more early than late.
 - **Review comes before cost tiers** because the queue shows what is actually failing,
   and corrections supply fresh labels to measure the tiers against.
+- **Documents, then tenancy, then the portal (2026-10-25).** A client portal needs
+  tenancy first, and tenancy gets more expensive with every month of data and code
+  written without it. The admin Documents page needs no tenancy and is useful at once,
+  and its client filter is a small addition later. Hosting moved after them: a demo
+  with real users should not predate per-client isolation.
 - **LangGraph changed role.** It was promised as phase 5, for batch fan-out and
   interrupt/resume at review. The `jobs` table already does fan-out, and review is a
   status rather than a paused process. So LangGraph is now tied to the one genuinely
@@ -1746,6 +1759,32 @@ not printed". It noticed the sample was an invoice, left out the ledger mapping 
 purchase order is not a payment, and flagged that a missing line amount would need a
 transform. Drafting calls are not yet in the cost report, because there is no document
 to attach them to, like the analyst's (§8.7).
+
+### 9.3 Tenancy, before the client portal
+
+Decided before any of it is built (2026-10-25). The admin panel is for the Ledgerline
+team. Clients get a separate portal on the same backend, where each sees only their own
+documents. "Only their own" cannot be a `WHERE` clause each route remembers to add: one
+forgotten route leaks one client's invoices to another, and in a finance product that
+ends the business. So:
+
+- **Organisations own everything a client sees.** Every document belongs to one, and
+  its extractions, jobs and ledger rows follow it. Users and API keys belong to one too,
+  so an ERP's key reads its own company's documents and no one else's.
+- **Scoping happens in one place.** The caller's organisation is applied by a layer
+  every query goes through, not by each route. The Ledgerline team's accounts are the
+  explicit exception that sees across organisations.
+- **Postgres row-level security is the second layer.** The database refuses another
+  organisation's rows even if the application asks for them, which is a large part of
+  why the move to Postgres came first.
+- **Another organisation's document is a 404, never a 403.** A 403 would confirm it
+  exists. Every endpoint gets a test that tries to cross over.
+- **Duplicate detection becomes per organisation.** Today `sha256` is unique globally,
+  so if client B uploads the exact file client A already sent, B gets back **A's
+  document and its extracted data**. That's harmless with one user and a leak with two.
+- **Processors are shared or a client's own.** The generic invoice and receipt types
+  serve everyone, and a client can have types for their own vendors. A client's
+  documents route against the shared ones plus their own.
 
 ### 9.2 Why Postgres
 
