@@ -1760,6 +1760,31 @@ purchase order is not a payment, and flagged that a missing line amount would ne
 transform. Drafting calls are not yet in the cost report, because there is no document
 to attach them to, like the analyst's (§8.7).
 
+**Step 3: the admin Documents page.** Every document from every client, for the
+Ledgerline team (`/panel/documents`): newest first, filterable by outcome, processor and
+age, with a cursor rather than an offset, so new arrivals don't shift the pages. Each
+document has a page with:
+- the original, shown inline;
+- the normalised result, with derived fields marked;
+- a timeline of every stage, with how long it took;
+- every model call, with its cost;
+- the job queue's state;
+- the OCR text and the model's raw answer.
+
+Three decisions:
+- **Every processor's routing score is recorded**, on the `classified` event and on the
+  `unsupported` one. Before, only the winner's score was kept, and an unsupported
+  document kept nothing, though that is where "why didn't this match?" gets asked.
+- **The original is served by `GET /documents/{id}/file`** as the type detected at
+  upload, never one the caller names. Only allowlisted types are ever stored, so nothing
+  served can be HTML or SVG. It is sent with `nosniff` and `no-store`. The uploader's
+  filename goes into `Content-Disposition` as a sanitised ASCII copy plus the exact name
+  percent-encoded, so a quote or line break in it can't end the header or start another;
+  a test sends one.
+- **There is no API endpoint that lists documents.** Before tenancy it would give every
+  key every client's documents. The panel may list them because only the Ledgerline team
+  has panel accounts. The client portal gets its own scoped list after §9.3.
+
 ### 9.3 Tenancy, before the client portal
 
 Decided before any of it is built (2026-10-25). The admin panel is for the Ledgerline

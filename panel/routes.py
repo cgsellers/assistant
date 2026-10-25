@@ -25,6 +25,7 @@ ever failed.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, Request, UploadFile, status
@@ -40,12 +41,29 @@ from api.routes.processors import get_drafter, get_extractor, get_ocr_engine
 from core import repository, users
 from core.auth import SESSION_COOKIE, Principal, Role, require_principal, require_role
 from core.db import get_session
-from doctypes import authoring
+from doctypes import authoring, results
 from doctypes.authoring import AuthoringError, Conflict, NotFound
 
 HERE = Path(__file__).parent
 STATIC_DIR = HERE / "static"
 templates = Jinja2Templates(directory=HERE / "templates")
+
+
+def _duration(value: timedelta | None) -> str:
+    """How long a step took, at a precision a person reads: 340 ms, 2.4 s, 3 min."""
+    if value is None:
+        return ""
+    seconds = value.total_seconds()
+    if seconds < 1:
+        return f"{seconds * 1000:.0f} ms"
+    if seconds < 60:
+        return f"{seconds:.1f} s"
+    if seconds < 3600:
+        return f"{seconds / 60:.0f} min"
+    return f"{seconds / 3600:.1f} h"
+
+
+templates.env.filters["duration"] = _duration
 
 router = APIRouter(prefix="/panel", include_in_schema=False)
 
@@ -224,6 +242,73 @@ def _kind(line: str) -> str:
     if line.startswith("@@"):
         return "hunk"
     return {"+": "add", "-": "del"}.get(line[:1], "same")
+
+
+# --- Documents ---------------------------------------------------------------
+# Every document from every client: the panel is the Ledgerline team's. The
+# client portal will get its own, scoped view once tenancy exists (DESIGN §9.3).
+
+#: The age filter's choices, in days. None is "all time".
+SINCE_DAYS = {"1": 1, "7": 7, "30": 30}
+
+
+@router.get("/documents", response_class=HTMLResponse)
+def documents(
+    request: Request,
+    outcome: str = "",
+    processor: str = "",
+    days: str = "",
+    before: str = "",
+    session: Session = Depends(get_session),
+    principal: Principal = Depends(require_principal),
+):
+    since = None
+    if days in SINCE_DAYS:
+        since = datetime.now(UTC) - timedelta(days=SINCE_DAYS[days])
+    cursor = _parse_cursor(before)
+    rows = results.list_documents(
+        session,
+        outcome=outcome or None,
+        processor=processor or None,
+        since=since,
+        before=cursor,
+        limit=PAGE_SIZE,
+    )
+    return _page(
+        request, "documents.html", principal,
+        rows=rows,
+        filters={"outcome": outcome, "processor": processor, "days": days},
+        outcomes=sorted(set(results.OUTCOMES.values())),
+        processors=[p.name for p in authoring.list_processors(session)],
+        next_before=rows[-1].uploaded_at.isoformat() if len(rows) == PAGE_SIZE else None,
+    )
+
+
+@router.get("/documents/{document_id}", response_class=HTMLResponse)
+def document(
+    document_id: str,
+    request: Request,
+    session: Session = Depends(get_session),
+    principal: Principal = Depends(require_principal),
+):
+    row = repository.get_document(session, document_id)
+    if row is None:
+        return _page(
+            request, "missing.html", principal, detail="No such document", status_code=404
+        )
+    detail = results.document_detail(session, row)
+    previewable = row.mime_type in ("image/jpeg", "image/png", "image/webp", "application/pdf")
+    return _page(request, "document.html", principal, previewable=previewable, **detail)
+
+
+PAGE_SIZE = 50
+
+
+def _parse_cursor(value: str) -> datetime | None:
+    try:
+        return datetime.fromisoformat(value) if value else None
+    except ValueError:
+        return None
 
 
 # --- Drafting and editing ----------------------------------------------------

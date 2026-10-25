@@ -115,6 +115,20 @@ def route(session: Session, ocr_text: str) -> RouteResult | None:
     )
 
 
+def scores(session: Session, ocr_text: str) -> dict[str, dict[str, float]]:
+    """
+    Every active type's evidence for this text: {name: {"hits": n, "score": s}}.
+
+    Recorded with the routing decision, because the winner's score alone does
+    not explain a wrong route ("invoice 2 signals, receipt 3") and an
+    unsupported document -- where nobody won -- would otherwise keep nothing.
+    """
+    return {
+        d.name: dict(zip(("hits", "score"), match_evidence(d, ocr_text), strict=True))
+        for d in active_definitions(session)
+    }
+
+
 def pick(definitions: list[Definition], ocr_text: str) -> tuple[Definition, float] | None:
     """
     The winning type and its score, or None. Pure, so it can be run over a

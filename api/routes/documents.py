@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import binascii
 from base64 import b64decode
+from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile, status
 from sqlalchemy.orm import Session
 
 from api.schemas import Base64Upload, DocumentDetail, DocumentOut, OcrResultOut, ResultOut
@@ -119,6 +120,59 @@ def get_ocr(
     out.block_count = len(result.layout_blocks or [])
     out.layout_blocks = result.layout_blocks if include_blocks else None
     return out
+
+
+@router.get(
+    "/{document_id}/file",
+    response_class=Response,
+    summary="Get the original file",
+    responses={200: {"content": {"image/*": {}, "application/pdf": {}}}},
+)
+def get_file(document_id: str, session: Session = Depends(get_session)) -> Response:
+    """
+    The bytes exactly as uploaded, to view beside what was extracted from them.
+
+    Served as the type detected at upload -- never one the caller names -- and
+    only types on the upload allowlist ever got stored, so nothing here can be
+    HTML or SVG and run in a browser. `nosniff` stops the browser guessing
+    otherwise, and `no-store` keeps documents full of personal data out of
+    every cache on the way.
+    """
+    document = repository.get_document(session, document_id)
+    if document is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No such document")
+    try:
+        data = storage.load(document.storage_key)
+    except FileNotFoundError:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, "The file is missing from storage"
+        ) from None
+    return Response(
+        content=data,
+        media_type=document.mime_type,
+        headers={
+            "Content-Disposition": _disposition(document.original_filename),
+            "X-Content-Type-Options": "nosniff",
+            "Cache-Control": "private, no-store",
+        },
+    )
+
+
+def _disposition(filename: str | None) -> str:
+    """
+    `inline`, with the uploader's filename made safe for a header.
+
+    The name is whatever the uploader sent. A quote, a backslash or a line
+    break in it would otherwise end the header value early or start a new
+    header, so the plain `filename` gets a sanitised ASCII copy and the exact
+    name travels percent-encoded in `filename*` (RFC 6266), which browsers prefer.
+    """
+    if not filename:
+        return "inline"
+    plain = "".join(
+        c if 32 <= ord(c) < 127 and c not in '"\\' else "_" for c in filename
+    )
+    return f"inline; filename=\"{plain}\"; filename*=UTF-8''{quote(filename, safe='')}"
 
 
 @router.get(

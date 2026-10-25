@@ -276,6 +276,7 @@ def run_extract_job(session: Session, job: Job, extractor: Extractor) -> None:
     # two-column receipt the flat order pairs names with the wrong prices.
     text = extraction_text(ocr.full_text or "", blocks_from_json(ocr.layout_blocks))
     match = registry.route(session, text)
+    evidence = registry.scores(session, text)
     if match is None:
         # Not a failure. No registered type cleared its own min_score, so there
         # is nothing to extract against. A model classifier for this case is
@@ -283,7 +284,7 @@ def run_extract_job(session: Session, job: Job, extractor: Extractor) -> None:
         # extracted against a guess. The job did its work, so it is done.
         _record_transition(
             session, document, DocStatus.UNSUPPORTED,
-            {"reason": "no document type matched", "chars": len(text)},
+            {"reason": "no document type matched", "chars": len(text), "scores": evidence},
         )
         job.status = JobStatus.DONE
         job.last_error = None
@@ -302,6 +303,7 @@ def run_extract_job(session: Session, job: Job, extractor: Extractor) -> None:
             "schema_version": definition.version,
             "score": match.score,
             "profile": match.profile_key,
+            "scores": evidence,
         },
     )
     session.commit()

@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+{% set doc = document %}
+{% block title %}{{ doc.original_filename or doc.id[:8] }}{% endblock %}
+{% block content %}
+<p class="crumbs"><a href="/panel/documents">Documents</a> / {{ doc.original_filename or doc.id[:8] }}</p>
+<h1>{{ doc.original_filename or doc.id }}
+  <span class="badge {{ result.outcome }}">{{ result.outcome|replace("_", " ") }}</span>
+</h1>
+
+<div class="split">
+  <section class="original">
+    {% if previewable and doc.mime_type == "application/pdf" %}
+    <iframe src="/documents/{{ doc.id }}/file" title="The original document"></iframe>
+    {% elif previewable %}
+    <img src="/documents/{{ doc.id }}/file" alt="The original document">
+    {% else %}
+    <p class="muted">{{ doc.mime_type }} can't be shown in the browser.</p>
+    {% endif %}
+    <p><a href="/documents/{{ doc.id }}/file">Open the original</a> <span class="muted">· {{ doc.mime_type }} · {{ (doc.size_bytes / 1024)|round(1) }} KB</span></p>
+  </section>
+
+  <section class="outcome">
+    <dl class="meta">
+      <dt>Status</dt><dd>{{ doc.status|replace("_", " ") }}</dd>
+      <dt>Processor</dt><dd>{% if result.processor %}<a href="/panel/processors/{{ result.processor.name }}/versions/{{ result.processor.version }}">{{ result.processor.name }} v{{ result.processor.version }}</a>{% if result.processor.profile %} · profile {{ result.processor.profile }}{% endif %}{% else %}—{% endif %}</dd>
+      <dt>Uploaded</dt><dd>{{ doc.uploaded_at.strftime("%Y-%m-%d %H:%M:%S") }} UTC</dd>
+      <dt>Took</dt><dd>{{ total_elapsed|duration or "—" }}</dd>
+      <dt>Cost</dt><dd>${{ "%.4f"|format(cost_usd) }}{% if trial_cost_usd %} <span class="muted">(+ ${{ "%.4f"|format(trial_cost_usd) }} in trials)</span>{% endif %}</dd>
+      <dt>Document id</dt><dd><code>{{ doc.id }}</code></dd>
+    </dl>
+
+    {% if result.transaction %}
+    {% set t = result.transaction %}
+    <h2>In the ledger</h2>
+    <p><strong>{{ t.amount }} {{ t.currency or "" }}</strong> {{ "paid to" if t.direction == "out" else "received from" }} {{ t.counterparty or "an unnamed party" }}{% if t.occurred_on %} on {{ t.occurred_on }}{% endif %}{% if t.tax_amount %} · tax {{ t.tax_amount }}{% endif %}
+      {% for d in t.derived %}<span class="badge draft" title="worked out by the transform">{{ d }} derived</span>{% endfor %}</p>
+    {% endif %}
+
+    {% if result.problems %}
+    <h2>Why it needs review</h2>
+    <ul class="problems">{% for p in result.problems %}<li><code>{{ p }}</code></li>{% endfor %}</ul>
+    {% endif %}
+
+    {% if result.data %}
+    <h2>What was extracted</h2>
+    <table class="compact">
+      <thead><tr><th>Field</th><th>Value</th><th></th></tr></thead>
+      <tbody>
+        {% for field, value in result.data.items() %}
+        <tr>
+          <td><code>{{ field }}</code></td>
+          <td>{% if value is none %}<span class="muted">null</span>
+              {% elif value is mapping or (value is iterable and value is not string) %}<pre class="inline">{{ value|tojson(indent=2) }}</pre>
+              {% else %}{{ value }}{% endif %}</td>
+          <td>{% if field in result.derived %}<span class="badge draft" title="worked out by the transform; the model read {{ result.read.get(field) if result.read else 'nothing' }}">derived</span>{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% elif result.outcome == "processing" %}
+    <p class="muted">Not extracted yet.</p>
+    {% endif %}
+  </section>
+</div>
+
+<h2>Timeline</h2>
+<ol class="timeline">
+  {% for step in timeline %}
+  <li>
+    <div class="when"><strong>{{ step.status|replace("_", " ") }}</strong>
+      <span class="muted">{{ step.at.strftime("%H:%M:%S") }}{% if step.took %} · +{{ step.took|duration }}{% endif %}</span></div>
+    {% set d = step.detail %}
+    {% if d %}
+    <div class="detail">
+      {% for key, value in d.items() if key not in ("scores", "validation_errors") %}
+      <span><span class="muted">{{ key|replace("_", " ") }}</span> {{ value if value is not none else "—" }}</span>
+      {% endfor %}
+      {% if d.validation_errors %}
+      <ul class="problems">{% for e in d.validation_errors %}<li><code>{{ e }}</code></li>{% endfor %}</ul>
+      {% endif %}
+      {% if d.scores %}
+      <table class="compact scores">
+        <thead><tr><th>Processor</th><th>Signals hit</th><th>Share</th></tr></thead>
+        <tbody>{% for name, s in d.scores.items() %}<tr{% if name == d.doc_type %} class="winner"{% endif %}><td>{{ name }}</td><td>{{ s.hits }}</td><td>{{ "%.2f"|format(s.score) }}</td></tr>{% endfor %}</tbody>
+      </table>
+      {% endif %}
+    </div>
+    {% endif %}
+  </li>
+  {% endfor %}
+</ol>
+
+{% if attempts %}
+<h2>Model calls</h2>
+<table class="compact">
+  <thead><tr><th>#</th><th>Kind</th><th>Processor</th><th>Model</th><th>Cost</th><th>Tokens in / out</th><th>Latency</th><th>When</th></tr></thead>
+  <tbody>
+    {% for a in attempts %}
+    <tr>
+      <td>{{ a.attempt }}</td>
+      <td>{% if a.is_trial %}<span class="badge draft">trial</span>{% elif a.raw_json is none %}<span class="badge failed">failed</span>{% elif a.is_current %}<span class="badge done">current</span>{% else %}<span class="badge published">superseded</span>{% endif %}</td>
+      <td>{{ a.doc_type }} v{{ a.schema_version }}</td>
+      <td class="muted">{{ a.model_used }}</td>
+      <td>{% if a.cost_usd is not none %}${{ "%.4f"|format(a.cost_usd) }}{% else %}—{% endif %}</td>
+      <td class="muted">{{ a.input_tokens or "—" }} / {{ a.output_tokens or "—" }}</td>
+      <td class="muted">{{ a.latency_ms ~ " ms" if a.latency_ms else "—" }}</td>
+      <td class="muted">{{ a.created_at.strftime("%H:%M:%S") }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+{% if jobs %}
+<h2>Jobs</h2>
+<table class="compact">
+  <thead><tr><th>Stage</th><th>State</th><th>Attempts</th><th>Last error</th></tr></thead>
+  <tbody>
+    {% for j in jobs %}
+    <tr>
+      <td>{{ j.kind }}</td>
+      <td>{{ j.status }}{% if j.status == "queued" and j.attempts %} <span class="muted">· retrying</span>{% endif %}</td>
+      <td>{{ j.attempts }} / {{ j.max_attempts }}</td>
+      <td>{% if j.last_error %}<code>{{ j.last_error }}</code>{% else %}—{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+{% if ocr %}
+<details>
+  <summary>The text that was read ({{ ocr.engine }}{% if ocr.mean_confidence is not none %}, confidence {{ "%.3f"|format(ocr.mean_confidence) }}{% endif %}, {{ ocr.full_text|length }} characters)</summary>
+  <pre class="code">{{ ocr.full_text }}</pre>
+</details>
+{% endif %}
+{% if result.read %}
+<details>
+  <summary>What the model returned, before the transform</summary>
+  <pre class="code">{{ result.read|tojson(indent=2) }}</pre>
+</details>
+{% endif %}
+{% endblock %}

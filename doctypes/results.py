@@ -23,13 +23,17 @@ Spanish receipt used. So the result says:
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
+from datetime import datetime
+from decimal import Decimal
 from typing import Any
 
 from pydantic import ValidationError
+from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session
 
 from core import money, repository
-from core.models import Document, Transaction
+from core.models import Document, Extraction, Job, Transaction
 from core.status import DocStatus
 from doctypes.definition import Definition
 from doctypes.transform import to_wire
@@ -135,4 +139,139 @@ def _transaction(row: Transaction) -> dict[str, Any]:
         "counterparty": row.counterparty,
         "counterparty_tax_id": row.counterparty_tax_id,
         "derived": row.derived_fields or [],
+    }
+
+
+# --- Browsing: the admin Documents pages ---------------------------------------
+# No API endpoint lists documents yet, on purpose: before tenancy (DESIGN §9.3)
+# it would hand every key every client's documents. The panel is for the
+# Ledgerline team, which may see them all.
+
+
+@dataclass(frozen=True)
+class DocumentRow:
+    id: str
+    filename: str | None
+    uploaded_at: datetime
+    status: str
+    outcome: str
+    processor: str | None
+    version: int | None
+    amount: str | None
+    currency: str | None
+    #: Everything billed for this document, failed attempts included; trials not.
+    cost_usd: Decimal
+
+
+def statuses_for(outcome: str) -> list[str]:
+    """The internal statuses a client-facing outcome stands for."""
+    return [status for status, out in OUTCOMES.items() if out == outcome]
+
+
+def list_documents(
+    session: Session,
+    *,
+    outcome: str | None = None,
+    processor: str | None = None,
+    since: datetime | None = None,
+    before: datetime | None = None,
+    limit: int = 50,
+) -> list[DocumentRow]:
+    """
+    Newest first, one query. `before` is the cursor for the next page: the
+    upload time of the last row shown, which stays correct while new documents
+    keep arriving, where an offset would shift under the reader.
+    """
+    cost = (
+        select(func.coalesce(func.sum(Extraction.cost_usd), 0))
+        .where(Extraction.document_id == Document.id, Extraction.is_trial.is_(False))
+        .correlate(Document)
+        .scalar_subquery()
+    )
+    stmt = (
+        select(
+            Document,
+            Extraction.doc_type,
+            Extraction.schema_version,
+            Transaction.amount,
+            Transaction.currency,
+            cost,
+        )
+        .outerjoin(
+            Extraction,
+            and_(Extraction.document_id == Document.id, Extraction.is_current.is_(True)),
+        )
+        .outerjoin(
+            Transaction,
+            and_(Transaction.document_id == Document.id, Transaction.is_current.is_(True)),
+        )
+        .order_by(Document.uploaded_at.desc(), Document.id.desc())
+        .limit(max(1, min(limit, 200)))
+    )
+    if outcome:
+        stmt = stmt.where(Document.status.in_(statuses_for(outcome)))
+    if processor:
+        stmt = stmt.where(Extraction.doc_type == processor)
+    if since is not None:
+        stmt = stmt.where(Document.uploaded_at >= since)
+    if before is not None:
+        stmt = stmt.where(Document.uploaded_at < before)
+
+    return [
+        DocumentRow(
+            id=document.id,
+            filename=document.original_filename,
+            uploaded_at=document.uploaded_at,
+            status=document.status,
+            outcome=OUTCOMES.get(document.status, "processing"),
+            processor=doc_type,
+            version=version,
+            amount=money.to_str(amount) if amount is not None else None,
+            currency=currency,
+            cost_usd=Decimal(str(spent or 0)),
+        )
+        for document, doc_type, version, amount, currency, spent in session.execute(stmt)
+    ]
+
+
+def document_detail(session: Session, document: Document) -> dict[str, Any]:
+    """Everything known about one document, for the page that explains it."""
+    events = list(document.events)
+    timeline = [
+        {
+            "status": event.to_status,
+            "at": event.created_at,
+            # How long it took to get here from the step before: where the
+            # time went, without timing anything twice.
+            "took": (event.created_at - events[i - 1].created_at) if i else None,
+            "detail": event.detail or {},
+        }
+        for i, event in enumerate(events)
+    ]
+    attempts = list(
+        session.scalars(
+            select(Extraction)
+            .where(Extraction.document_id == document.id)
+            .order_by(Extraction.created_at)
+        )
+    )
+    jobs = list(
+        session.scalars(
+            select(Job).where(Job.document_id == document.id).order_by(Job.created_at)
+        )
+    )
+    billed = [a.cost_usd for a in attempts if not a.is_trial and a.cost_usd is not None]
+    trials = [a.cost_usd for a in attempts if a.is_trial and a.cost_usd is not None]
+    return {
+        "document": document,
+        "result": document_result(session, document),
+        "timeline": timeline,
+        "attempts": attempts,
+        "jobs": jobs,
+        "ocr": repository.get_ocr_result(session, document.id),
+        "cost_usd": sum(billed, Decimal("0")),
+        "trial_cost_usd": sum(trials, Decimal("0")),
+        "total_elapsed": (
+            events[-1].created_at - events[0].created_at if len(events) > 1 else None
+        ),
     }

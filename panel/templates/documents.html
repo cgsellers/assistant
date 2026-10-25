@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Documents{% endblock %}
+{% block content %}
+<h1>Documents</h1>
+<p class="muted">Everything uploaded, newest first, across every client.</p>
+
+<form class="filters" method="get" action="/panel/documents">
+  <label>Outcome
+    <select name="outcome">
+      <option value="">any</option>
+      {% for o in outcomes %}<option value="{{ o }}"{% if filters.outcome == o %} selected{% endif %}>{{ o|replace("_", " ") }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>Processor
+    <select name="processor">
+      <option value="">any</option>
+      {% for p in processors %}<option value="{{ p }}"{% if filters.processor == p %} selected{% endif %}>{{ p }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>Uploaded
+    <select name="days">
+      <option value=""{% if not filters.days %} selected{% endif %}>any time</option>
+      <option value="1"{% if filters.days == "1" %} selected{% endif %}>last day</option>
+      <option value="7"{% if filters.days == "7" %} selected{% endif %}>last 7 days</option>
+      <option value="30"{% if filters.days == "30" %} selected{% endif %}>last 30 days</option>
+    </select>
+  </label>
+  <button type="submit">Filter</button>
+  {% if filters.outcome or filters.processor or filters.days %}<a href="/panel/documents">Clear</a>{% endif %}
+</form>
+
+{% if rows %}
+<table>
+  <thead>
+    <tr><th>Uploaded</th><th>Document</th><th>Outcome</th><th>Processor</th><th>Amount</th><th>Cost</th></tr>
+  </thead>
+  <tbody>
+    {% for r in rows %}
+    <tr>
+      <td><time datetime="{{ r.uploaded_at.isoformat() }}">{{ r.uploaded_at.strftime("%Y-%m-%d %H:%M") }}</time></td>
+      <td><a href="/panel/documents/{{ r.id }}">{{ r.filename or r.id[:8] }}</a></td>
+      <td><span class="badge {{ r.outcome }}">{{ r.outcome|replace("_", " ") }}</span></td>
+      <td>{% if r.processor %}{{ r.processor }} <span class="muted">v{{ r.version }}</span>{% else %}—{% endif %}</td>
+      <td>{% if r.amount %}{{ r.amount }} {{ r.currency or "" }}{% else %}—{% endif %}</td>
+      <td class="muted">${{ "%.4f"|format(r.cost_usd) }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% if next_before %}
+<p><a href="/panel/documents?outcome={{ filters.outcome|urlencode }}&amp;processor={{ filters.processor|urlencode }}&amp;days={{ filters.days|urlencode }}&amp;before={{ next_before|urlencode }}">Older →</a></p>
+{% endif %}
+{% else %}
+<p>No documents{% if filters.outcome or filters.processor or filters.days %} match these filters{% endif %}.</p>
+{% endif %}
+{% endblock %}

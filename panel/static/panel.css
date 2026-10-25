@@ -117,3 +117,26 @@ button.danger { background: var(--bad); border-color: var(--bad); }
 form textarea:not(.code) { display: block; width: 100%; box-sizing: border-box; margin-top: 0.3rem;
   padding: 0.5rem 0.6rem; border: 1px solid var(--line); border-radius: 6px; font: inherit; resize: vertical; }
 .drafted { margin-top: 1rem; }
+
+/* Documents */
+header nav a { margin-right: 1rem; }
+.badge.done { color: var(--good); }
+.badge.needs_review { color: var(--warn); }
+.badge.failed, .badge.unsupported { color: var(--bad); }
+.badge.processing { color: var(--muted); }
+form.filters { display: flex; align-items: flex-end; gap: 1rem; flex-wrap: wrap; margin: 1rem 0; }
+form.filters label { margin: 0; }
+form.filters select { display: block; margin-top: 0.3rem; padding: 0.4rem; border: 1px solid var(--line);
+  border-radius: 6px; font: inherit; }
+.split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1.5rem; margin-top: 1rem; }
+@media (max-width: 1000px) { .split { grid-template-columns: 1fr; } }
+.original img, .original iframe { width: 100%; border: 1px solid var(--line); border-radius: 6px; }
+.original iframe { height: 75vh; }
+.outcome h2 { font-size: 1.05rem; margin: 1.25rem 0 0.4rem; }
+ol.timeline { list-style: none; padding: 0; border-left: 2px solid var(--line); margin-left: 0.4rem; }
+ol.timeline li { padding: 0.3rem 0 0.6rem 1rem; position: relative; }
+ol.timeline li::before { content: ""; position: absolute; left: -6px; top: 0.75rem; width: 10px; height: 10px;
+  border-radius: 50%; background: var(--accent); }
+ol.timeline .detail { font-size: 0.88rem; margin-top: 0.2rem; display: flex; flex-wrap: wrap; gap: 0.25rem 1rem; }
+ol.timeline .detail table, ol.timeline .detail ul { flex-basis: 100%; }
+table.scores { max-width: 420px; }

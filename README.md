@@ -115,6 +115,11 @@ stateDiagram-v2
 
 `reprocessing` exists because schemas change and historical documents get re-run from stored OCR text — no re-upload, no re-OCR. `committed` and `synced` are separate because third-party delivery fails independently and must retry without touching the ledger.
 
+**What the team sees.** The panel's Documents page lists every document with its
+outcome, processor, amount and cost. Each document's page puts the original beside what
+was extracted from it, then shows the timeline of stages with their durations, every
+processor's routing score, every model call with its cost, and the OCR text.
+
 **What a client system gets back.** `GET /documents/{id}/result` is the import side: an
 ERP uploads a PDF, then polls this until `outcome` is no longer `processing`.
 

@@ -213,6 +213,7 @@ class TestOpenApi:
             "/documents/{document_id}",
             "/documents/{document_id}/ocr",
             "/documents/{document_id}/result",
+            "/documents/{document_id}/file",
             "/costs",
             "/health",
             "/ready",
