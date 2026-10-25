@@ -1,0 +1,126 @@
+# Every push and pull request: lint, the suite on both databases, migrations
+# in both directions, and both images built and inspected.
+#
+# Nothing here needs a secret. The suite runs with fake engines and a fake
+# model, so no API key is ever present in CI -- and a test that reached the
+# real API would fail rather than quietly spend money.
+
+name: ci
+
+on:
+  push:
+  pull_request:
+
+# Read the repository and nothing else.
+permissions:
+  contents: read
+
+# A newer push to the same branch makes an older run's answer irrelevant.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UV_VERSION: "0.12.13"
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+      - run: uv sync --frozen
+      - run: uv run ruff check .
+
+  test-sqlite:
+    # The default: a fresh SQLite file per test, no service to start.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+      - run: uv sync --frozen
+      - run: uv run pytest -p no:cacheprovider
+      - name: Migrations, up then down then up
+        env:
+          DATABASE_URL: sqlite:///./ci-migrations.db
+        run: |
+          uv run alembic upgrade head
+          uv run alembic check
+          uv run alembic downgrade base
+          uv run alembic upgrade head
+
+  test-postgres:
+    # The deployment database. It enforces column lengths, stores real
+    # timestamps, sorts JSONB keys and takes row locks -- each of which hid a
+    # bug from the SQLite run (DESIGN §9.2), so both always run.
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: ledgerline
+          POSTGRES_PASSWORD: ledgerline
+          POSTGRES_DB: ledgerline_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ledgerline -d ledgerline_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgresql+psycopg://ledgerline:ledgerline@localhost:5432/ledgerline_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+      - run: uv sync --frozen
+      - run: uv run pytest -p no:cacheprovider
+      - name: Migrations, up then down then up
+        # Their own database: the suite builds its schema with create_all,
+        # and this checks the migrations reach the same place.
+        env:
+          PGPASSWORD: ledgerline
+          DATABASE_URL: postgresql+psycopg://ledgerline:ledgerline@localhost:5432/ledgerline_migrations
+        run: |
+          psql -h localhost -U ledgerline -d ledgerline_test -c "CREATE DATABASE ledgerline_migrations"
+          uv run alembic upgrade head
+          uv run alembic check
+          uv run alembic downgrade base
+          uv run alembic upgrade head
+
+  images:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the app image
+        run: docker build -t ledgerline-app:ci -f Dockerfile .
+      - name: Build the OCR image
+        run: docker build -t ledgerline-ocr:ci -f services/ocr_service/Dockerfile .
+      - name: The app image starts
+        run: |
+          docker run --rm -e DATABASE_URL=postgresql+psycopg://x:y@nowhere/z \
+            --entrypoint python ledgerline-app:ci -c "import api.main, worker.run"
+      - name: Neither image runs as root
+        run: |
+          for image in ledgerline-app:ci ledgerline-ocr:ci; do
+            uid=$(docker run --rm --entrypoint id "$image" -u)
+            if [ "$uid" = "0" ]; then echo "$image runs as root"; exit 1; fi
+          done
+      - name: No secrets or private data in either image
+        # The root .dockerignore is what keeps them out; this is what notices
+        # if a change to it, or to a COPY line, lets them in.
+        run: |
+          for image in ledgerline-app:ci ledgerline-ocr:ci; do
+            docker run --rm --entrypoint sh "$image" -c '
+              found=$(find / -xdev \( -name ".env" -o -path "*/data/evals*" -o -name "ledgerline.db" \) 2>/dev/null)
+              if [ -n "$found" ]; then echo "found in image: $found"; exit 1; fi'
+          done

@@ -27,5 +27,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY ocr/__init__.py ocr/base.py ocr/pdftext.py ./ocr/
 COPY services/ocr_service/app.py .
 
+# Not root. Of every process in the system this is the one most likely to be
+# handed a hostile file, so it gets the least: compose also drops every
+# capability and mounts the filesystem read-only, and CI fails if either
+# image runs as root.
+RUN useradd --system --uid 10001 --no-create-home ocr
+USER ocr
+
 EXPOSE 8001
 CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8001"]

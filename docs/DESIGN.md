@@ -1863,6 +1863,27 @@ without it nothing could get a result out through the API at all. Decided:
 
 Webhooks, per-client field names and the mapping tool stay deferred (§9).
 
+**Then CI (step 2.5).** `.github/workflows/ci.yml` runs four jobs on every push and pull
+request, with no secrets, because the suite needs none. Any test that reached the real
+model would fail rather than spend money.
+
+- **Lint.**
+- **The suite on SQLite**, then the migrations up to head, `alembic check`, down to base
+  and back up.
+- **The suite on Postgres 17** as a service container, then the same migration round
+  trip in a database of its own. Both databases always run, because each of the bugs in
+  this section was invisible on one of them.
+- **Both images built and inspected.** The app image must start, neither may run as
+  root, and neither may contain `.env`, the eval corpus or a database file. The
+  `.dockerignore` keeps those out; this is what notices if a change lets them in.
+
+Writing the root check found that **the OCR container ran as root**: the one process
+most likely to be handed a hostile file. It was otherwise hardened (no capabilities,
+read-only filesystem, no new privileges), but now runs as an unprivileged user too.
+Checked afterwards on a real receipt: 34 blocks at 0.992 confidence, so the models
+still load. The migration round trip was run locally on both databases before the
+workflow existed: every migration reverses cleanly.
+
 ---
 
 ## 10. Reproducing the verification

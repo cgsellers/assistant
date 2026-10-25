@@ -433,6 +433,10 @@ workflow. To run on Postgres rather than SQLite, use the `DATABASE_URL` shown in
 unless `TEST_DATABASE_URL` points it at Postgres (create the database first with
 `docker exec ledgerline-db createdb -U ledgerline ledgerline_test`).
 
+CI (`.github/workflows/ci.yml`) runs all of the below on every push: lint, the suite on
+SQLite and on Postgres, every migration up and back down on both, and both images built
+and checked (non-root, no secrets or private data inside).
+
 Lint and tests:
 
 ```bash
