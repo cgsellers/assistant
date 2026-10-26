@@ -1,13 +1,14 @@
 import { createColumnHelper, tableFeatures, useTable } from "@tanstack/react-table";
 import { ArrowDown } from "lucide-react";
 import type { MouseEvent } from "react";
-import { Link, useNavigate } from "react-router";
+import { Link, useLocation, useNavigate } from "react-router";
 import type { DocumentRow, SortKey } from "@/api/contract";
 import { StatusBadge } from "@/components/status-badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TD, TH, THead, TR } from "@/components/ui/table";
 import { formatDay, formatDocumentDate, formatMoney, formatTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import type { FromList } from "./DocumentPage";
 import { useDocumentQuery } from "./queries";
 
 const features = tableFeatures({});
@@ -50,6 +51,27 @@ function SortHeader({ sortKey, children }: { sortKey: SortKey; children: string 
   );
 }
 
+/** Supplier, with the file under it; the link is how keyboards and screen readers open a row. */
+function SupplierCell({ row }: { row: DocumentRow }) {
+  const { id, supplier, filename } = row;
+  const { search } = useLocation();
+  return (
+    <div className="min-w-0">
+      <Link
+        to={`/documents/${id}`}
+        state={{ from: search } satisfies FromList}
+        className={cn(
+          "block truncate font-medium hover:underline",
+          !supplier && "font-normal text-muted",
+        )}
+      >
+        {supplier ?? filename ?? "Untitled document"}
+      </Link>
+      {supplier && filename && <div className="truncate text-xs text-muted">{filename}</div>}
+    </div>
+  );
+}
+
 const columns = column.columns([
   column.accessor("received_at", {
     id: "received",
@@ -76,23 +98,7 @@ const columns = column.columns([
   column.display({
     id: "supplier",
     header: "Supplier",
-    cell: ({ row }) => {
-      const { id, supplier, filename } = row.original;
-      return (
-        <div className="min-w-0">
-          <Link
-            to={`/documents/${id}`}
-            className={cn(
-              "block truncate font-medium hover:underline",
-              !supplier && "font-normal text-muted",
-            )}
-          >
-            {supplier ?? filename ?? "Untitled document"}
-          </Link>
-          {supplier && filename && <div className="truncate text-xs text-muted">{filename}</div>}
-        </div>
-      );
-    },
+    cell: ({ row }) => <SupplierCell row={row.original} />,
   }),
   column.accessor((row) => row.type?.label ?? null, {
     id: "type",
@@ -129,6 +135,7 @@ const WIDTH: Record<string, string> = {
 export function DocumentsTable({ rows, refreshing }: { rows: DocumentRow[]; refreshing: boolean }) {
   const table = useTable({ features, columns, data: rows, getRowId: (row) => row.id });
   const navigate = useNavigate();
+  const location = useLocation();
   const sortedBy = useDocumentQuery().query.sort ?? "received";
 
   // The whole row opens the document; the supplier link inside is what the
@@ -136,7 +143,7 @@ export function DocumentsTable({ rows, refreshing }: { rows: DocumentRow[]; refr
   function open(event: MouseEvent<HTMLTableRowElement>, id: string) {
     if ((event.target as HTMLElement).closest("a, button")) return;
     if (window.getSelection()?.toString()) return;
-    navigate(`/documents/${id}`);
+    navigate(`/documents/${id}`, { state: { from: location.search } satisfies FromList });
   }
 
   return (

@@ -1,5 +1,6 @@
 import { HttpResponse, http } from "msw";
 import type { components } from "@/api/schema";
+import { singleDocumentHandlers } from "./document";
 import { documentHandlers } from "./documents";
 
 type Me = components["schemas"]["MeOut"];
@@ -32,6 +33,7 @@ export function setSignedIn(value: boolean) {
 
 export const handlers = [
   ...documentHandlers,
+  ...singleDocumentHandlers,
   http.get("/api/auth/me", () =>
     signedIn
       ? HttpResponse.json(MOCK_USER)

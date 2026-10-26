@@ -2,6 +2,7 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useCallback, useMemo } from "react";
 import { useSearchParams } from "react-router";
 import type {
+  DocumentFields,
   DocumentList,
   DocumentQuery,
   DocumentSummary,
@@ -103,5 +104,18 @@ export function useDocumentTypes() {
     queryKey: ["documents", "types"],
     queryFn: () => getJson<DocumentTypes>("/documents/types"),
     staleTime: 5 * 60_000,
+  });
+}
+
+/** How often a document still being read is asked about again. */
+export const POLL_MS = 3000;
+
+/** One document as the portal shows it; asks again while it is still being read. */
+export function useDocumentFields(id: string) {
+  return useQuery({
+    queryKey: ["documents", "one", id],
+    queryFn: () => getJson<DocumentFields>(`/documents/${encodeURIComponent(id)}/fields`),
+    refetchInterval: (query) =>
+      query.state.data?.document.outcome === "processing" ? POLL_MS : false,
   });
 }

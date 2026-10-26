@@ -14,7 +14,7 @@ import type {
  * real month: several suppliers and currencies, mostly ready, a few needing
  * review, one still being read, one not recognised.
  */
-const SUPPLIERS: [string, string, string][] = [
+export const SUPPLIERS: [string, string, string][] = [
   ["Northwind Office Supply", "invoice", "GBP"],
   ["Globe Logistics", "invoice", "EUR"],
   ["Coop Italia", "receipt", "EUR"],
@@ -25,7 +25,7 @@ const SUPPLIERS: [string, string, string][] = [
   ["Café Luna", "receipt", "EUR"],
 ];
 
-const TYPES: DocumentTypes = [
+export const TYPES: DocumentTypes = [
   { name: "invoice", label: "Invoice" },
   { name: "receipt", label: "Receipt" },
 ];
@@ -38,8 +38,11 @@ function outcomeFor(index: number): Outcome {
   return "done";
 }
 
-function amountFor(index: number): string {
-  const base = ((index * 7919) % 250000) / 100 + 12;
+/** What document `index` adds up to: an invoice's hundreds or thousands, a receipt's few euros. */
+export function amountFor(index: number): string {
+  const kind = SUPPLIERS[index % SUPPLIERS.length]?.[1];
+  const base =
+    kind === "receipt" ? ((index * 7919) % 6000) / 100 + 3 : ((index * 7919) % 250000) / 100 + 12;
   return base.toFixed(2);
 }
 

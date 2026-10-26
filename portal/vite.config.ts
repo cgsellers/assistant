@@ -16,6 +16,10 @@ export default defineConfig({
     alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
   },
   build: {
+    // PDF.js is the one chunk over Vite's 500 kB default (630 kB). It loads
+    // only when a PDF is opened, never with the app, so the limit is raised
+    // just past it: anything else growing that large still warns.
+    chunkSizeWarningLimit: 700,
     rolldownOptions: {
       output: {
         // The framework in its own chunk: it changes with dependency upgrades,

@@ -68,3 +68,55 @@ export interface DocumentSummary {
 
 /** GET /documents/types: the kinds of document this client's documents were read as. */
 export type DocumentTypes = { name: string; label: string }[];
+
+/** The value kinds a processor's fields can have (doctypes/definition.py FieldType). */
+export type FieldType = "string" | "integer" | "number" | "money" | "date" | "boolean";
+
+/** A single value: money as "104.88", dates as YYYY-MM-DD -- the same wire form as /result. */
+export type FieldValue = string | number | boolean | null;
+
+interface FieldBase {
+  /** The key in /result's `data`. */
+  name: string;
+  /** For people: "Invoice number" for invoice_number. */
+  label: string;
+  /** Worked out by the processor's transform rather than read off the page. */
+  derived: boolean;
+  /** Why this field holds the document in review, or null. */
+  problem: string | null;
+}
+
+export interface ScalarField extends FieldBase {
+  type: FieldType;
+  value: FieldValue;
+}
+
+/** A repeated group, such as line items: shown as a table. */
+export interface ListField extends FieldBase {
+  type: "list";
+  columns: { name: string; label: string; type: FieldType }[];
+  rows: Record<string, FieldValue>[];
+}
+
+export type Field = ScalarField | ListField;
+
+/**
+ * GET /documents/{id}/fields: one document as the portal shows it.
+ *
+ * Shaped for a screen, unlike /result, which is shaped for an ERP and stays
+ * stable for it: labels, types and per-field problems are here and not there.
+ * 5.4 adds PATCH on the same path for corrections.
+ */
+export interface DocumentFields {
+  document: DocumentRow & { mime_type: string; size_bytes: number };
+  /** Which processor read it, or null if none has (yet). */
+  processor: { name: string; label: string; version: number } | null;
+  /** The document's currency, for every money field on it. */
+  currency: string | null;
+  /** In the processor's own order. Empty until the document has been read. */
+  fields: Field[];
+  /** Problems not about any one field, such as "Line items do not add up to the subtotal". */
+  problems: string[];
+  /** When the fields were read: ISO 8601, or null. */
+  read_at: string | null;
+}

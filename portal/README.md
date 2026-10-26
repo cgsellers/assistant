@@ -21,8 +21,9 @@ With `dev:mocks`, sign in as `bo@acme.test` with the password `correct horse bat
 | `src/api/schema.d.ts` | Types generated from the API's OpenAPI schema. Never edited by hand. |
 | `src/api/contract.ts` | Endpoints the portal needs that the API does not have yet. Each is deleted once the API serves it. |
 | `src/mocks/` | MSW handlers, shared by the browser (`dev:mocks`) and the tests. They are the contract. |
+| `src/mocks/files.ts` | The mock originals: each invoice a generated PDF, each receipt a canvas-drawn photo, matching its fields. |
 | `src/components/ui/` | Buttons, inputs, tables and menus, on Radix primitives. Our own code, not a dependency. |
-| `src/features/` | One folder per area: `auth`, `documents`. |
+| `src/features/` | One folder per area: `auth`, `documents` (the list, and one document with its viewer in `viewer/`). |
 | `src/lib/` | The API client, formatting of money and dates, small helpers. |
 
 Tests render the real routes against the mock API (`src/test/render.tsx`), and any

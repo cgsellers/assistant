@@ -2049,6 +2049,39 @@ Found on the way:
   the URL only when something else changed it, such as Clear filters or the back button.
   A test types across the pause, and it fails against the old behaviour.
 
+**5.3 built: the document page.** The original on the left, what was read on the right.
+- **A screen-shaped endpoint beside the ERP's.** `/documents/{id}/result` is what an ERP
+  imports: field names, problems as plain strings, and a shape that has to stay stable
+  for machines. The page needs more: labels, each field's type (to show money in the
+  document's currency and dates written out), which problem belongs to which field, and
+  which values the transform worked out. So the portal gets `GET /documents/{id}/fields`
+  (in the contract), and 5.4 adds `PATCH` on the same path for corrections. The ERP's
+  contract is untouched.
+- **The viewer** stacks a PDF's pages through PDF.js, with selectable text, or shows the
+  photo. Zoom is relative to fitting the panel. Anything the browser can't show, such as
+  a TIFF outside Safari or a damaged PDF, falls back to a download. PDF.js (630 kB) is
+  its own chunk and loads only when a PDF is opened; the page itself is 14 kB.
+- **Every state says what happened and what to do:**
+  - needs review: the problems, and which fields are flagged;
+  - processing: polls every three seconds and updates by itself;
+  - not recognised, and couldn't be read: what to try next;
+  - an unknown id: not found.
+  A value the processor worked out is marked "Calculated", and an absent one reads
+  "Not on the document".
+- **Back** returns to the list with its filters, carried in the navigation state.
+- **The mock documents have real originals.** Each invoice is a PDF and each receipt a
+  photo, generated from the same sale as its fields:
+  - The PDFs are written by hand, one page in the PDF's built-in Helvetica, so nothing
+    is embedded. The receipts are drawn on a canvas, slightly rotated on a dark table.
+  - Each original prints in its supplier's own conventions. Rotterdam prints
+    `€ 91,19` and `24-10-2026`; Seattle prints `10/21/2026`. The page shows them
+    normalised, which is what the product is for.
+  - The awkward cases have originals to match: an invoice whose second page never came
+    (no total), a torn receipt, lines that don't add up, an invoice due before it was
+    issued, a blurred photo, a delivery note, and an invoice with no printed total that
+    the transform works out.
+  - A test opens the generated PDFs with the real PDF.js and reads the formats back.
+
 ### 9.2 Why Postgres
 
 SQLite was right for getting started: nothing to run, and a suite of several hundred
