@@ -1974,6 +1974,53 @@ every statement and failing closed (4.2); the database refusing the rest, as a r
 cannot opt out (4.3); routing, access and spend per client (4.4); and every route checked
 against all of it, including the ones not written yet (4.5).
 
+### 9.4 The client portal
+
+Decided 2026-10-26, before any of it was built. Clients get their own website: their
+documents in a table (with the document's own date and the date it reached Ledgerline),
+each one opening on the original beside what was read from it. **The client fixes what
+needs review**, so editing and confirming fields happen there rather than in the
+team's panel.
+
+- **A React app, unlike the panel.** The panel is a workshop for a handful of trusted
+  authors, and server-rendered HTMX suits it (§9.1). The portal is the product as a
+  client sees it, with the interaction to match: a filterable table, a document viewer
+  with fields highlighted on the original, inline correction, live upload progress.
+  That is where a single-page app earns its build tooling. The stack:
+  - Vite, React and strict TypeScript;
+  - Tailwind with shadcn/ui-style components on Radix primitives, kept in our own code;
+  - TanStack Query and Table, and React Router;
+  - PDF.js for the viewer;
+  - Vitest with Testing Library, and Biome.
+- **Same origin, under `/api`.** In development Vite forwards `/api/*` to FastAPI, and in
+  production a proxy will do the same, so the HttpOnly session cookie and the CSRF header
+  work exactly as they do for the panel. No CORS, no tokens in browser storage. The CSRF
+  token lives in memory and comes back from `/auth/me` after a reload.
+- **Types generated from the API.** `npm run api` dumps FastAPI's OpenAPI schema
+  (`python -m api.openapi`) and generates the client's types from it. CI regenerates them
+  and fails on any difference, so a renamed field is a type error, not a blank cell. The
+  generator runs through `npx` at a pinned version, because it supports TypeScript 5 and
+  the app is on 6, and a code generator need not share the app's compiler.
+- **Front end first, against mocks that are the contract.** MSW serves the endpoints that
+  don't exist yet, from the same handlers in the browser (`npm run dev:mocks`) and in tests.
+  Each one is the shape the backend then has to meet. A test fails on any request with no
+  handler, so a screen cannot quietly depend on an endpoint nobody has built.
+
+**5.1 built:**
+- the design system (one neutral scale, one indigo accent, Inter, tabular figures);
+- sign-in and sign-out, with a return to the page you were going to (only same-site
+  paths, since it comes from the URL);
+- the app shell, showing the client's organisation by name: `/auth/me` gained
+  `organisation_name`;
+- the typed client, the mocks, five tests and a CI job.
+
+Two things found on the way:
+- The client captured `fetch` when it was created, before the mock server had wrapped it,
+  so every test request went to the real network. It now looks `fetch` up on each call,
+  which also suits any library that wraps it in production.
+- Biome's config migration silently replaced the recommended lint rules with *none*. A
+  file with an `any`, a `==` and a `debugger` now proves the rules run.
+
 ### 9.2 Why Postgres
 
 SQLite was right for getting started: nothing to run, and a suite of several hundred

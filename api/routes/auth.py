@@ -17,6 +17,7 @@ from core import users
 from core.auth import CSRF_HEADER, SESSION_COOKIE, Principal, require_principal
 from core.config import get_settings
 from core.db import get_session
+from core.models import Organisation
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -31,6 +32,8 @@ class MeOut(BaseModel):
     name: str
     role: str
     organisation_id: str | None = None
+    #: Shown to the person, e.g. in the portal's header.
+    organisation_name: str | None = None
     #: The Ledgerline team, which sees every organisation's documents.
     is_staff: bool = False
     #: Only for a signed-in browser: what to send in the CSRF header.
@@ -72,6 +75,7 @@ def login(body: SignInIn, response: Response, session: Session = Depends(get_ses
         name=signed_in.user.email,
         role=signed_in.user.role,
         organisation_id=signed_in.user.organisation_id,
+        organisation_name=_organisation_name(session, signed_in.user.organisation_id),
         is_staff=signed_in.user.is_staff,
         csrf_token=signed_in.session.csrf_token,
     )
@@ -87,13 +91,25 @@ def logout(request: Request, response: Response, session: Session = Depends(get_
 
 
 @router.get("/me", response_model=MeOut, summary="Who this request is")
-def me(request: Request, principal: Principal | None = Depends(require_principal)):
+def me(
+    request: Request,
+    principal: Principal | None = Depends(require_principal),
+    session: Session = Depends(get_session),
+):
     signed_in = getattr(request.state, "user_session", None)
     return MeOut(
         kind=principal.kind,
         name=principal.name,
         role=principal.role,
         organisation_id=principal.organisation_id,
+        organisation_name=_organisation_name(session, principal.organisation_id),
         is_staff=principal.is_staff,
         csrf_token=signed_in.csrf_token if signed_in is not None else None,
     )
+
+
+def _organisation_name(session: Session, organisation_id: str | None) -> str | None:
+    if organisation_id is None:
+        return None
+    organisation = session.get(Organisation, organisation_id)
+    return organisation.name if organisation is not None else None

@@ -453,6 +453,17 @@ CI (`.github/workflows/ci.yml`) runs all of the below on every push: lint, the s
 SQLite and on Postgres, every migration up and back down on both, and both images built
 and checked (non-root, no secrets or private data inside).
 
+The client portal is a React app in `portal/` (DESIGN §9.4):
+
+```bash
+cd portal
+npm install
+npm run dev          # http://localhost:5173, using the API on :8000 through /api
+npm run dev:mocks    # the same with no backend, against the mock API
+npm run api          # regenerate the API types after a backend change
+npm test && npm run lint && npm run typecheck
+```
+
 Lint and tests:
 
 ```bash

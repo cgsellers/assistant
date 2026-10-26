@@ -20,3 +20,7 @@ data/
 .mypy_cache/
 .idea/
 .vscode/
+
+# The portal's dependencies and builds: large, and rebuilt inside its own image.
+**/node_modules/
+portal/dist/

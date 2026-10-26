@@ -1,0 +1,65 @@
+@import "tailwindcss";
+@import "@fontsource-variable/inter";
+
+/*
+ * The portal's design tokens. One accent, one neutral scale, status colours
+ * used sparingly: the documents are the content, and the chrome stays out of
+ * their way. Every colour and radius in the components comes from here.
+ */
+@theme {
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+
+  --color-canvas: #f7f7f8;
+  --color-surface: #ffffff;
+  --color-line: #e7e7ea;
+  --color-line-strong: #d4d4d8;
+  --color-ink: #18181b;
+  --color-ink-soft: #3f3f46;
+  --color-muted: #71717a;
+  --color-faint: #a1a1aa;
+
+  --color-brand: #3b3fd8;
+  --color-brand-strong: #2f32b8;
+  --color-brand-soft: #eef0ff;
+
+  --color-ok: #127a4b;
+  --color-ok-soft: #e8f6ef;
+  --color-attention: #a35b00;
+  --color-attention-soft: #fff4e2;
+  --color-danger: #b42318;
+  --color-danger-soft: #fdecea;
+  --color-working: #52525b;
+  --color-working-soft: #f1f1f3;
+
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+
+  --shadow-card: 0 1px 2px rgb(24 24 27 / 0.04), 0 1px 1px rgb(24 24 27 / 0.03);
+  --shadow-pop: 0 8px 24px rgb(24 24 27 / 0.1), 0 2px 6px rgb(24 24 27 / 0.06);
+}
+
+@layer base {
+  html {
+    font-family: var(--font-sans);
+    color: var(--color-ink);
+    background: var(--color-canvas);
+    -webkit-font-smoothing: antialiased;
+    font-feature-settings: "cv11", "ss01";
+  }
+
+  body {
+    min-height: 100vh;
+  }
+
+  /* Amounts and dates line up in columns. */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-brand);
+    outline-offset: 2px;
+  }
+}
