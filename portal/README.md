@@ -1,32 +1,29 @@
-# React + TypeScript + Vite
+# Ledgerline client portal
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+The website a client's staff use: their documents, each one beside what was read from
+it, and fixing what needs review. A React app talking to the Ledgerline API on the same
+origin under `/api`. The decisions behind it are in `docs/DESIGN.md` §9.4.
 
-Currently, two official plugins are available:
-
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```bash
+npm install
+npm run dev          # http://localhost:5173, using the API on :8000 through /api
+npm run dev:mocks    # no backend: the mock API in src/mocks
+npm run api          # regenerate src/api/schema.d.ts after a backend change
+npm test && npm run lint && npm run typecheck && npm run build
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+With `dev:mocks`, sign in as `bo@acme.test` with the password `correct horse battery`.
+
+## Layout
+
+| Path | What it is |
+|---|---|
+| `src/api/schema.d.ts` | Types generated from the API's OpenAPI schema. Never edited by hand. |
+| `src/api/contract.ts` | Endpoints the portal needs that the API does not have yet. Each is deleted once the API serves it. |
+| `src/mocks/` | MSW handlers, shared by the browser (`dev:mocks`) and the tests. They are the contract. |
+| `src/components/ui/` | Buttons, inputs, tables and menus, on Radix primitives. Our own code, not a dependency. |
+| `src/features/` | One folder per area: `auth`, `documents`. |
+| `src/lib/` | The API client, formatting of money and dates, small helpers. |
+
+Tests render the real routes against the mock API (`src/test/render.tsx`), and any
+request without a handler fails the test.

@@ -2021,6 +2021,34 @@ Two things found on the way:
 - Biome's config migration silently replaced the recommended lint rules with *none*. A
   file with an `any`, a `==` and a `debugger` now proves the rules run.
 
+**5.2 built: the documents table.** Against four mocked endpoints whose shapes are in
+`portal/src/api/contract.ts`: `GET /documents` (filtered, sorted, a page at a time by
+cursor), `/documents/summary`, `/documents/types` and `/documents/export` (CSV).
+- Columns: received (day and time, in the reader's zone), the document's own date,
+  supplier with the file name under it, type, total and status. A missing value shows as
+  a dash with a spoken label ("No total"), never as zero. Statuses use the client's
+  words: Ready, Needs review, Processing, Not recognised, Failed.
+- Every filter is in the URL (status, type, search, received from and to, sort), so a
+  view can be bookmarked or sent on and the back button undoes a filter. Search waits
+  for a pause in typing.
+- Cursors are opaque, so "previous page" cannot be worked out from one. The cursors of
+  the pages before ride in the history entry.
+- The summary shows spend per currency and never adds across currencies; its "need
+  review" count is a shortcut to that filter.
+- The export link carries the current filters but not the page.
+- Pages load on demand, and the framework sits in its own chunk, which stays cached
+  across deploys.
+
+Found on the way:
+- CI failed on 5.1 although everything passed locally: `portal/src/lib/` had never been
+  committed. The root `.gitignore` is the stock Python one, and its `lib/` matches a
+  directory of that name anywhere in the tree. It is now anchored to the root (`/lib/`).
+  CI building from a clean checkout is what caught it.
+- The search box trimmed what it put in the URL and then copied the URL back into
+  itself, so a pause after "Globe " lost the space before the next word. It now follows
+  the URL only when something else changed it, such as Clear filters or the back button.
+  A test types across the pause, and it fails against the old behaviour.
+
 ### 9.2 Why Postgres
 
 SQLite was right for getting started: nothing to run, and a suite of several hundred

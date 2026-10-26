@@ -15,6 +15,22 @@ export default defineConfig({
   resolve: {
     alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
   },
+  build: {
+    rolldownOptions: {
+      output: {
+        // The framework in its own chunk: it changes with dependency upgrades,
+        // not with every deploy, so browsers keep it cached across releases.
+        codeSplitting: {
+          groups: [
+            {
+              name: "framework",
+              test: /node_modules[\\/](react|react-dom|react-router|scheduler|@tanstack[\\/](query-core|react-query))[\\/]/,
+            },
+          ],
+        },
+      },
+    },
+  },
   server: {
     port: 5173,
     proxy: {
