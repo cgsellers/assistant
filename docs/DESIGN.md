@@ -1585,14 +1585,14 @@ kept in brackets, so earlier sections that say "phase 6" still point somewhere.
 | 7 | Analyst agent over `transactions`: read-only tools, citations, approval gate |
 | Step 1 | Processor authoring: API, panel, users and roles, trial runs, versions, publish and retire, Draft with AI (§9.1) |
 | Step 2, all but hosting | Postgres; compose with an isolated OCR container; `/ready`; the result endpoint; CI on both databases (§9.2) |
+| Step 3 | Admin Documents page: originals, timelines, every routing score, model calls |
+| Step 4 | Tenancy: ownership, scoping that fails closed, Postgres row-level security as a bound role, per-client processors and routing, every route crossed (§9.3) |
 
 **Next, in order** (reordered again on 2026-10-25)
 
 | Step | Ships | Done when | Demonstrates |
 |---|---|---|---|
-| **3** | Admin Documents page: every document with its original file, a timeline of its stages (every routing score, durations), its result and cost; filters by outcome, processor and date | Any document's journey is answerable from one page | Operability |
-| **4** | Tenancy: organisations own documents, keys and users; scoping in one place; Postgres row-level security behind it; duplicates detected per organisation; shared and client-specific processors (§9.3) | A second organisation can see nothing of the first, and tests on every endpoint prove it | Multi-tenancy done structurally |
-| 5 | Client portal: each client's staff see only their documents and results, upload, download, and manage their ERP's API key | A client signs in and sees only their own | The product's outside |
+| **5** | Client portal: each client's staff see only their documents and results, upload, download, and manage their ERP's API key | A client signs in and sees only their own | The product's outside |
 | 6 | Hosted demo on synthetic data (moved out of step 2) | A public URL | Production shape |
 | 7 (phase 4) | Review queue and corrections; corrections become eval labels; probable-duplicate detection (§8.6); reprocessing after a publish | No document sits in review without a way to fix it | Human in the loop; labels from use |
 | 8 (phase 4) | A model classifier when no keyword matches; vision fallback for photos that fail their rules; each tier measured | A table of share, accuracy and cost per tier | Cost engineering |
@@ -1946,6 +1946,34 @@ document routed.
   so. `core.costs --client acme` reports one client. **The analyst** answers from
   whichever ledger its session is scoped to, which a test pins rather than new code.
 
+**4.5, every route crossed.** `tests/test_every_route.py` walks the routes the application
+actually serves (49, the panel's included) and gives each a kind: public, the caller's own
+session, upload, a client's document by id, a client's listing, team-only, or a team page
+about one document. **A route with no kind fails the suite**, with a message saying what to
+decide, so a route added next year cannot slip past isolation: its author has to say what
+it exposes, and the kind chooses the checks that then run against it.
+
+- **A document by id:** another client's answers byte for byte like a missing one, and
+  staff do reach it, so the 404 is isolation and not a broken route.
+- **A listing:** none of another client's ids, names, filenames or extracted values appear
+  anywhere in the response.
+- **Team-only:** a client's key is refused, and so is a client's signed-in user carrying a
+  valid CSRF token, so the 403 is the team check itself.
+- **A team page about a document:** even the team's own key gets 404 for a client's
+  document, because keys are never staff.
+- **Upload:** a client uploading another client's exact bytes gets a new document of its
+  own.
+
+Proved both ways. With isolation switched off (every caller given everyone's scope), six
+checks fail: the four document routes, the cost listing and the team-key page. And a
+route added without a kind fails the first test. 94 checks, named by route, so a failure
+in CI says which route leaked.
+
+**Tenancy, complete.** Ownership on every row (4.1); a scope on every session, applied to
+every statement and failing closed (4.2); the database refusing the rest, as a role that
+cannot opt out (4.3); routing, access and spend per client (4.4); and every route checked
+against all of it, including the ones not written yet (4.5).
+
 ### 9.2 Why Postgres
 
 SQLite was right for getting started: nothing to run, and a suite of several hundred
@@ -2179,8 +2207,13 @@ connect, start with [WALKTHROUGH.md](WALKTHROUGH.md).
 - **How do you stop one client seeing another's data?** §9.3. A scope on every database
   session, applied by a hook to every statement, so no route filters and none can forget;
   a session with no scope raises instead of returning everything. Another client's
-  document is answered exactly like a missing one. From step 4.3, Postgres row-level
-  security underneath, so the database refuses even if the application asks.
+  document is answered exactly like a missing one. Postgres row-level security
+  underneath, as a role that can't bypass it, so the database refuses even if the
+  application asks.
+- **And how do you know the next endpoint won't leak?** Every route the app serves is
+  given a kind in one test, and an unlisted route fails the suite. The kind picks the
+  crossover checks, so writing the route means deciding what it exposes, and the checks
+  run whether or not anyone remembers them.
 - **You let a model write processors?** §9.1. It drafts data, never code: fields,
   descriptions and keywords, checked by the same validation as a person's work. The
   lessons that matter are enforced in code rather than asked for. It gets one repair

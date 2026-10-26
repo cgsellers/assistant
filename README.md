@@ -374,14 +374,14 @@ short of the ledger, which is right for one an analyst is still shaping.
 validation, transforms and the ledger (2); the eval harness with a held-out set (3); the
 `invoice` type and PDF text layers (part of 4); the analyst agent (7); processor
 authoring with a panel, users, roles and Draft with AI (step 1); Postgres, containers
-with isolated OCR, readiness checks, the result endpoint and CI (step 2, all but hosting).
+with isolated OCR, readiness checks, the result endpoint and CI (step 2, all but hosting);
+the admin Documents page (3); multi-tenancy with Postgres row-level security and every
+route checked for crossover (4).
 
 **Next, in order** ([DESIGN §9](docs/DESIGN.md)):
 
 | Step | Ships | Demonstrates |
 |---|---|---|
-| 3 | Admin Documents page: each document's original, timeline, result and cost | Operability |
-| 4 | Tenancy: organisations, scoping in one place, row-level security, per-client dedup ([§9.3](docs/DESIGN.md)) | Multi-tenancy done structurally |
 | 5 | Client portal: each client sees only their own documents and results | The product's outside |
 | 6 | Hosted demo on synthetic data | Production shape |
 | 7 | Review queue and corrections; corrections become eval labels; duplicate detection; reprocessing | Human in the loop |
