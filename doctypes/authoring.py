@@ -26,6 +26,7 @@ from __future__ import annotations
 import difflib
 import logging
 from dataclasses import dataclass, field
+from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
@@ -35,7 +36,14 @@ from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from core import repository
-from core.models import DocumentTypeDefinition, Extraction
+from core.models import (
+    DocumentTypeDefinition,
+    Extraction,
+    Organisation,
+    Processor,
+    ProcessorAccess,
+    utcnow,
+)
 from doctypes import registry
 from doctypes.definition import Definition
 from doctypes.schema import build_json_schema, match_evidence, select_profile
@@ -79,6 +87,14 @@ class Summary:
     active_version: int | None
     latest_published: int | None
     drafts: list[int]
+    #: Who may use it: everyone, or this many organisations (0 is nobody).
+    available_to_all: bool = False
+    granted: int = 0
+
+    @property
+    def unreachable(self) -> bool:
+        """Live, and yet no organisation may be routed to it."""
+        return self.active_version is not None and not self.available_to_all and not self.granted
 
     @property
     def status(self) -> str:
@@ -100,6 +116,13 @@ def list_processors(session: Session) -> list[Summary]:
     for row in rows:
         by_name.setdefault(row.name, []).append(row)
 
+    processors = {p.name: p for p in session.scalars(select(Processor))}
+    granted = dict(
+        session.execute(
+            select(ProcessorAccess.processor_name, func.count())
+            .group_by(ProcessorAccess.processor_name)
+        ).all()
+    )
     summaries = []
     for name, versions in by_name.items():
         published = [r.version for r in versions if r.is_published]
@@ -111,6 +134,8 @@ def list_processors(session: Session) -> list[Summary]:
                 active_version=active,
                 latest_published=max(published) if published else None,
                 drafts=[r.version for r in versions if not r.is_published],
+                available_to_all=bool(processors.get(name) and processors[name].available_to_all),
+                granted=granted.get(name, 0),
             )
         )
     return summaries
@@ -463,6 +488,97 @@ def publish_preview(session: Session, name: str, version: int) -> PublishPreview
     )
 
 
+# --- Who may use it ---------------------------------------------------------
+# DESIGN §9.3: a processor is for every organisation, or for those granted it.
+# Admin-only at the API and the panel; these functions trust their caller to
+# have checked.
+
+
+@dataclass(frozen=True)
+class Access:
+    name: str
+    available_to_all: bool
+    #: Organisations granted it, by name -- meaningful when not everyone's.
+    organisations: list[Organisation]
+    changed_at: datetime | None
+    changed_by: str | None
+
+    @property
+    def nobody(self) -> bool:
+        return not self.available_to_all and not self.organisations
+
+
+def access(session: Session, name: str) -> Access:
+    processor = session.get(Processor, name)
+    if processor is None:
+        raise NotFound(f"no processor called {name!r}")
+    organisations = list(
+        session.scalars(
+            select(Organisation)
+            .join(ProcessorAccess, ProcessorAccess.organisation_id == Organisation.id)
+            .where(ProcessorAccess.processor_name == name)
+            .order_by(Organisation.name)
+        )
+    )
+    return Access(
+        name=name,
+        available_to_all=processor.available_to_all,
+        organisations=organisations,
+        changed_at=processor.access_changed_at,
+        changed_by=processor.access_changed_by,
+    )
+
+
+def may_use(session: Session, name: str, organisation_id: str) -> bool:
+    """Whether documents of `organisation_id` may be routed to processor `name`."""
+    processor = session.get(Processor, name)
+    if processor is None:
+        return False
+    if processor.available_to_all:
+        return True
+    return session.get(ProcessorAccess, (name, organisation_id)) is not None
+
+
+def set_access(
+    session: Session,
+    name: str,
+    *,
+    available_to_all: bool,
+    organisation_ids: list[str],
+    changed_by: str,
+) -> Access:
+    """
+    Replace who may use a processor. Grants that stay keep their original
+    date and author; only additions are new. Takes effect on the next
+    document routed -- access is not versioned, so taking it away does not
+    wait for anything to be published.
+    """
+    processor = session.get(Processor, name)
+    if processor is None:
+        raise NotFound(f"no processor called {name!r}")
+    wanted = set(organisation_ids)
+    known = set(session.scalars(select(Organisation.id).where(Organisation.id.in_(wanted))))
+    if unknown := wanted - known:
+        raise AuthoringError("no such organisation", sorted(unknown))
+
+    current = {grant.organisation_id: grant for grant in processor.grants}
+    for organisation_id in set(current) - wanted:
+        processor.grants.remove(current[organisation_id])
+    for organisation_id in wanted - set(current):
+        processor.grants.append(
+            ProcessorAccess(organisation_id=organisation_id, granted_by=changed_by)
+        )
+    processor.available_to_all = available_to_all
+    processor.access_changed_at = utcnow()
+    processor.access_changed_by = changed_by
+    session.commit()
+    log.info(
+        "%s set access on %s: %s", changed_by, name,
+        "every organisation" if available_to_all else f"{len(wanted)} organisation(s)",
+    )
+    return access(session, name)
+
+
 # --- Trying it --------------------------------------------------------------
 
 
@@ -490,6 +606,9 @@ class Trial:
     #: Set when the trial ran on a stored document and was recorded.
     extraction_id: str | None = None
     profile: str | None = field(default=None)
+    #: On a stored document: whether its organisation may use this processor.
+    #: False means it would never be routed there, however well it matched.
+    allowed: bool | None = None
 
 
 def trial_run(
@@ -517,18 +636,32 @@ def trial_run(
     row = get_version(session, name, version)
     definition = parse(row.definition)
 
+    organisation_id = None
     if document_id is not None:
         text = _document_text(session, document_id)
+        organisation_id = repository.get_document(session, document_id).organisation_id
     elif not text or not text.strip():
         raise AuthoringError("give a stored document or some text to try it on")
 
-    candidates = [d for d in registry.active_definitions(session) if d.name != name]
-    candidates.append(definition)
-    candidates.sort(key=lambda d: d.name)
+    # On a stored document, routing as it would run for that document: among
+    # the processors its organisation may use. The version being tried always
+    # takes part -- it is what is being tried -- and `allowed` says whether
+    # that organisation could actually be routed to it once it is live.
+    others = [
+        c for c in registry.candidates(session, organisation_id) if c.definition.name != name
+    ]
+    allowed = None if organisation_id is None else may_use(session, name, organisation_id)
+    tried = registry.Candidate(
+        definition,
+        dedicated=bool(allowed) and not access(session, name).available_to_all,
+    )
+    candidates = sorted([*others, tried], key=lambda c: c.definition.name)
     picked = registry.pick(candidates, text)
     scores = {
-        d.name: dict(zip(("hits", "score"), match_evidence(d, text), strict=True))
-        for d in candidates
+        c.definition.name: dict(
+            zip(("hits", "score"), match_evidence(c.definition, text), strict=True)
+        )
+        for c in candidates
     }
 
     profile_key, profile = select_profile(definition, text)
@@ -580,6 +713,7 @@ def trial_run(
         chars=len(text),
         extraction_id=extraction_id,
         profile=profile_key,
+        allowed=allowed,
     )
 
 

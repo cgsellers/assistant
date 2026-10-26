@@ -6,6 +6,9 @@
     {% else %}<span class="badge retired">would match nothing</span>{% endif %}
     <span class="muted">{{ trial.chars }} characters of text{% if trial.profile %} · issuer profile {{ trial.profile }}{% endif %}</span>
   </p>
+  {% if trial.allowed is false %}
+  <p class="warn">⚠ This document's organisation may not use {{ trial.name }}, so live documents like it would never be routed here. Change who may use it on the processor's page.</p>
+  {% endif %}
   <table class="compact">
     <thead><tr><th>Processor</th><th>Signals hit</th><th>Share</th></tr></thead>
     <tbody>

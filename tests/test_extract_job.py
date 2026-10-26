@@ -23,6 +23,13 @@ from .conftest import TINY_PNG, FakeExtractor, demo_org_id, receipt_definition, 
 
 OCR_TEXT = "CAFE LUNA\nTOTAL\n9.35"
 
+def _shared(session, definition, **kwargs):
+    """A processor every organisation may use, as the starter seeds are."""
+    return repository.create_document_type_version(
+        session, definition, available_to_all=True, **kwargs
+    )
+
+
 
 @pytest.fixture(autouse=True)
 def _cold_registry():
@@ -74,7 +81,7 @@ class TestPermanentFailures:
     def test_a_refusal_sends_the_document_to_review_and_fails_the_job(
         self, session, ready
     ):
-        repository.create_document_type_version(session, receipt_definition())
+        _shared(session, receipt_definition())
         document, _ = ready()
         job = claim_extract(session)
 
@@ -91,7 +98,7 @@ class TestPermanentFailures:
         assert session.query(Extraction).count() == 0
 
     def test_the_review_event_says_why(self, session, ready):
-        repository.create_document_type_version(session, receipt_definition())
+        _shared(session, receipt_definition())
         document, _ = ready()
         worker.run_extract_job(
             session,
@@ -105,7 +112,7 @@ class TestPermanentFailures:
         assert last.detail["kind"] == "refused"
 
     def test_a_missing_ocr_result_does_not_crash_the_worker(self, session, ready):
-        repository.create_document_type_version(session, receipt_definition())
+        _shared(session, receipt_definition())
         document, _ = ready(with_ocr=False)
         job = claim_extract(session)
 
@@ -144,7 +151,7 @@ class TestPermanentFailures:
 
 class TestTransientFailures:
     def test_a_transient_error_requeues_with_backoff(self, session, ready):
-        repository.create_document_type_version(session, receipt_definition())
+        _shared(session, receipt_definition())
         document, _ = ready()
         job = claim_extract(session)
 
@@ -158,7 +165,7 @@ class TestTransientFailures:
         assert "rate limited" in job.last_error
 
     def test_retries_are_exhausted_into_review_not_retried_forever(self, session, ready):
-        repository.create_document_type_version(session, receipt_definition())
+        _shared(session, receipt_definition())
         document, _ = ready()
         extractor = FakeExtractor(raises=ExtractionError("connection failed"))
 
@@ -183,10 +190,7 @@ class TestTransientFailures:
 
 class TestRouting:
     def test_no_match_is_unsupported_and_never_calls_the_model(self, session, ready):
-        repository.create_document_type_version(
-            session,
-            receipt_definition(matches={"keywords": ["albaran"], "min_score": 0.9}),
-        )
+        _shared(session, receipt_definition(matches={"keywords": ["albaran"], "min_score": 0.9}))
         document, _ = ready()
         job = claim_extract(session)
         extractor = FakeExtractor()
@@ -199,9 +203,7 @@ class TestRouting:
         assert extractor.calls == []
 
     def test_an_unpublished_type_does_not_catch_traffic(self, session, ready):
-        repository.create_document_type_version(
-            session, receipt_definition(), publish=False, activate=False
-        )
+        _shared(session, receipt_definition(), publish=False, activate=False)
         document, _ = ready()
 
         worker.run_extract_job(session, claim_extract(session), FakeExtractor())
@@ -218,7 +220,7 @@ class TestRouting:
                 }
             }
         )
-        repository.create_document_type_version(session, definition)
+        _shared(session, definition)
         document, _ = ready()
         extractor = FakeExtractor({"total": "9.35", "vendor": "CAFE LUNA"})
 
@@ -236,7 +238,7 @@ class TestRouting:
 
 class TestTheStoredRow:
     def test_cost_and_provenance_are_persisted(self, session, ready):
-        repository.create_document_type_version(session, receipt_definition())
+        _shared(session, receipt_definition())
         document, _ = ready()
 
         worker.run_extract_job(
@@ -259,7 +261,7 @@ class TestTheStoredRow:
         self, session, ready
     ):
         """Decimal and date do not survive a JSON column, and evals score the raw answer."""
-        repository.create_document_type_version(session, receipt_definition())
+        _shared(session, receipt_definition())
         document, _ = ready()
 
         worker.run_extract_job(
@@ -273,7 +275,7 @@ class TestTheStoredRow:
         assert row.validation_errors == []  # but it coerced and validated fine
 
     def test_a_second_extraction_supersedes_the_first(self, session, ready):
-        repository.create_document_type_version(session, receipt_definition())
+        _shared(session, receipt_definition())
         document, _ = ready()
 
         worker.run_extract_job(
@@ -339,7 +341,7 @@ class TestReachingTheLedger:
     """
 
     def test_a_validated_document_is_committed_to_the_ledger(self, session, ready):
-        repository.create_document_type_version(session, _ledger_receipt())
+        _shared(session, _ledger_receipt())
         document, _ = ready()
 
         worker.run_extract_job(
@@ -361,7 +363,7 @@ class TestReachingTheLedger:
         from datetime import date
         from decimal import Decimal
 
-        repository.create_document_type_version(session, _ledger_receipt())
+        _shared(session, _ledger_receipt())
         document, _ = ready()
         worker.run_extract_job(
             session,
@@ -380,7 +382,7 @@ class TestReachingTheLedger:
         assert row.extraction.raw_json["total"] == "9,35"
 
     def test_the_commit_event_records_what_was_written(self, session, ready):
-        repository.create_document_type_version(session, _ledger_receipt())
+        _shared(session, _ledger_receipt())
         document, _ = ready()
         worker.run_extract_job(
             session, claim_extract(session), FakeExtractor({"total": "9,35"})
@@ -400,7 +402,7 @@ class TestReachingTheLedger:
         described. core.money is now the single rule, applied on the way out
         of the database as well as into the event.
         """
-        repository.create_document_type_version(session, _ledger_receipt())
+        _shared(session, _ledger_receipt())
         document, _ = ready()
         worker.run_extract_job(
             session, claim_extract(session), FakeExtractor({"total": "9,35"})
@@ -414,7 +416,7 @@ class TestReachingTheLedger:
 
     def test_a_type_without_a_mapping_stops_at_validated(self, session, ready):
         """Not a failure: a type an analyst is still shaping has no ledger row."""
-        repository.create_document_type_version(session, receipt_definition())
+        _shared(session, receipt_definition())
         document, _ = ready()
 
         worker.run_extract_job(
@@ -426,7 +428,7 @@ class TestReachingTheLedger:
         assert repository.current_transaction(session, document.id) is None
 
     def test_a_document_in_review_never_reaches_the_ledger(self, session, ready):
-        repository.create_document_type_version(session, _ledger_receipt())
+        _shared(session, _ledger_receipt())
         document, _ = ready()
 
         # Negative total trips the `positive` rule.
@@ -445,7 +447,7 @@ class TestReachingTheLedger:
 
         from core.models import Transaction
 
-        repository.create_document_type_version(session, _ledger_receipt())
+        _shared(session, _ledger_receipt())
         document, _ = ready()
 
         worker.run_extract_job(
@@ -490,7 +492,7 @@ class TestBilledFailuresAreRecorded:
     def test_a_billed_refusal_leaves_a_row_with_its_cost(self, session, ready):
         from decimal import Decimal
 
-        repository.create_document_type_version(session, receipt_definition())
+        _shared(session, receipt_definition())
         ready()
 
         worker.run_extract_job(
@@ -508,7 +510,7 @@ class TestBilledFailuresAreRecorded:
 
     def test_an_unbilled_failure_still_leaves_nothing(self, session, ready):
         """A dropped connection never reached the model, so nothing was spent."""
-        repository.create_document_type_version(session, receipt_definition())
+        _shared(session, receipt_definition())
         ready()
 
         worker.run_extract_job(
@@ -522,7 +524,7 @@ class TestBilledFailuresAreRecorded:
     def test_a_billed_transient_failure_is_recorded_and_still_retried(
         self, session, ready
     ):
-        repository.create_document_type_version(session, receipt_definition())
+        _shared(session, receipt_definition())
         ready()
         job = claim_extract(session)
 
@@ -540,7 +542,7 @@ class TestBilledFailuresAreRecorded:
         The property that makes recording failures safe: the row counts for
         cost, but a document's live extraction stays the one that worked.
         """
-        repository.create_document_type_version(session, receipt_definition())
+        _shared(session, receipt_definition())
         document, _ = ready()
 
         worker.run_extract_job(

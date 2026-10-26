@@ -7,7 +7,7 @@
 {% if processors %}
 <table>
   <thead>
-    <tr><th>Name</th><th>Status</th><th>Live</th><th>Latest published</th><th>Drafts</th></tr>
+    <tr><th>Name</th><th>Status</th><th>Who may use it</th><th>Live</th><th>Latest published</th><th>Drafts</th></tr>
   </thead>
   <tbody>
     {% for p in processors %}
@@ -15,6 +15,7 @@
       <td><a href="/panel/processors/{{ p.name }}">{{ p.name }}</a>
         {% if p.display_name %}<span class="muted">{{ p.display_name }}</span>{% endif %}</td>
       <td><span class="badge {{ p.status }}">{{ p.status }}</span></td>
+      <td>{% if p.available_to_all %}everyone{% elif p.granted %}{{ p.granted }} organisation{{ "" if p.granted == 1 else "s" }}{% else %}<span class="badge failed" title="no organisation's documents can be routed to it">nobody</span>{% endif %}</td>
       <td>{% if p.active_version %}<a href="/panel/processors/{{ p.name }}/versions/{{ p.active_version }}">v{{ p.active_version }}</a>{% else %}—{% endif %}</td>
       <td>{% if p.latest_published %}v{{ p.latest_published }}{% else %}—{% endif %}</td>
       <td>{% for d in p.drafts %}<a href="/panel/processors/{{ p.name }}/versions/{{ d }}">v{{ d }}</a>{% if not loop.last %}, {% endif %}{% else %}—{% endfor %}</td>

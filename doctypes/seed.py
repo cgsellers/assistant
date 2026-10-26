@@ -123,7 +123,10 @@ def sync(session: Session, definitions: list[Definition]) -> dict[str, str]:
     # transform never becomes live -- and nor do the types seeded beside it.
     check_transforms(missing)
     for definition in missing:
-        row = repository.create_document_type_version(session, definition, created_by="seed")
+        # The starter processors are the generic ones, for every organisation.
+        row = repository.create_document_type_version(
+            session, definition, created_by="seed", available_to_all=True
+        )
         actions[definition.name] = f"created (v{row.version})"
     return actions
 

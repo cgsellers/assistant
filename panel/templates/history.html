@@ -6,6 +6,38 @@
   {% if is_admin and versions|selectattr("is_active")|list %}<a class="button secondary" href="/panel/processors/{{ name }}/retire">Retire…</a>{% endif %}
 </h1>
 <p class="muted">Every version ever written. Published versions never change; a draft is edited in place until it is published.</p>
+
+<section class="card access">
+  <h2>Who may use it</h2>
+  {% if access.available_to_all %}
+  <p><span class="badge done">every organisation</span></p>
+  {% elif access.organisations %}
+  <p>{% for o in access.organisations %}<span class="badge published">{{ o.name }}</span> {% endfor %}</p>
+  {% else %}
+  <p><span class="badge failed">nobody</span>
+    {% if live %}<strong class="error">It is live, but no organisation's documents can be routed to it.</strong>{% else %}<span class="muted">Grant access before publishing, or nothing will reach it.</span>{% endif %}</p>
+  {% endif %}
+  {% if access.changed_by %}<p class="muted">Last changed by {{ access.changed_by }}{% if access.changed_at %} on {{ access.changed_at.strftime("%Y-%m-%d %H:%M") }} UTC{% endif %}.</p>{% endif %}
+
+  {% if is_admin %}
+  <details>
+    <summary>Change who may use it</summary>
+    <form hx-post="/panel/processors/{{ name }}/access" hx-target="#access-problems" hx-disabled-elt="find button">
+      <label class="choice"><input type="radio" name="who" value="all"{% if access.available_to_all %} checked{% endif %}> Every organisation</label>
+      <label class="choice"><input type="radio" name="who" value="some"{% if not access.available_to_all %} checked{% endif %}> Only these:</label>
+      <div class="organisations">
+        {% set granted = access.organisations|map(attribute="id")|list %}
+        {% for o in organisations %}
+        <label class="choice"><input type="checkbox" name="organisation" value="{{ o.id }}"{% if o.id in granted %} checked{% endif %}> {{ o.name }}{% if o.is_internal %} <span class="muted">(the team)</span>{% endif %}</label>
+        {% endfor %}
+      </div>
+      <p class="muted">Takes effect on the next document routed. Access isn't versioned: nothing needs publishing.</p>
+      <button type="submit">Save access</button>
+    </form>
+    <div id="access-problems"></div>
+  </details>
+  {% endif %}
+</section>
 <table>
   <thead>
     <tr><th>Version</th><th>State</th><th>Written by</th><th>Edited from</th><th>When</th><th></th></tr>

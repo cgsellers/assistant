@@ -201,6 +201,9 @@ def history(
         request, "history.html", principal,
         name=name, versions=versions,
         compare={row.version: _compare_with(row, versions) for row in versions},
+        access=authoring.access(session, name),
+        organisations=tenancy.all_organisations(session),
+        live=any(row.is_active for row in versions),
     )
 
 
@@ -523,6 +526,27 @@ def publish(
     """Every check runs again here: the page may be minutes old."""
     authoring.publish(session, name, version, published_by=principal.label)
     return _go(f"/panel/processors/{name}/versions/{version}")
+
+
+@router.post("/processors/{name}/access")
+def change_access(
+    name: str,
+    who: str = Form(),
+    organisation: list[str] = Form(default_factory=list),
+    session: Session = Depends(get_session),
+    principal: Principal = Depends(_ADMIN),
+):
+    """
+    Every organisation, or the ticked ones. Admin only, through HTMX. Takes
+    effect on the next document routed -- nothing to publish.
+    """
+    everyone = who == "all"
+    chosen = [] if everyone else organisation
+    authoring.set_access(
+        session, name,
+        available_to_all=everyone, organisation_ids=chosen, changed_by=principal.label,
+    )
+    return _go(f"/panel/processors/{name}")
 
 
 @router.get("/processors/{name}/retire", response_class=HTMLResponse)

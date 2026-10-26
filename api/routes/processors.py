@@ -163,6 +163,37 @@ class SummaryOut(BaseModel):
     active_version: int | None
     latest_published: int | None
     drafts: list[int]
+    #: Who may use it: every organisation, or `granted` of them (0 is nobody).
+    available_to_all: bool
+    granted: int
+
+
+class AccessIn(BaseModel):
+    """Every organisation, or exactly these (by slug). Replaces what was there."""
+
+    available_to_all: bool
+    organisations: list[str] = Field(default_factory=list)
+
+
+class AccessOut(BaseModel):
+    name: str
+    available_to_all: bool
+    #: Slugs of the organisations granted it.
+    organisations: list[str]
+    nobody: bool
+    changed_at: datetime | None
+    changed_by: str | None
+
+
+def _access_out(access) -> AccessOut:
+    return AccessOut(
+        name=access.name,
+        available_to_all=access.available_to_all,
+        organisations=[o.slug for o in access.organisations],
+        nobody=access.nobody,
+        changed_at=access.changed_at,
+        changed_by=access.changed_by,
+    )
 
 
 class TrialOut(BaseModel):
@@ -182,6 +213,7 @@ class TrialOut(BaseModel):
     chars: int
     extraction_id: str | None
     profile: str | None
+    allowed: bool | None
 
 
 def _detail(row: DocumentTypeDefinition) -> VersionDetail:
@@ -220,6 +252,8 @@ def list_processors(
             active_version=s.active_version,
             latest_published=s.latest_published,
             drafts=s.drafts,
+            available_to_all=s.available_to_all,
+            granted=s.granted,
         )
         for s in authoring.list_processors(session)
     ]
@@ -311,6 +345,36 @@ def publish(
     response names it, so the caller can merge from it.
     """
     return _detail(authoring.publish(session, name, version, published_by=who))
+
+
+@router.get("/{name}/access", response_model=AccessOut, summary="Who may use it")
+def get_access(
+    name: str, session: Session = Depends(get_session), _: Principal = Depends(require_team)
+):
+    return _access_out(authoring.access(session, name))
+
+
+@router.put("/{name}/access", response_model=AccessOut, summary="Change who may use it")
+def put_access(
+    name: str, body: AccessIn,
+    session: Session = Depends(get_session), who: str = Depends(admin),
+):
+    """
+    Admin only. Takes effect on the next document routed: access belongs to
+    the processor, not to a version, so nothing needs publishing.
+    """
+    from core import tenancy
+
+    ids = []
+    for slug in body.organisations:
+        organisation = tenancy.by_slug(session, slug)
+        if organisation is None:
+            raise AuthoringError("no such organisation", [slug])
+        ids.append(organisation.id)
+    return _access_out(authoring.set_access(
+        session, name, available_to_all=body.available_to_all,
+        organisation_ids=ids, changed_by=who,
+    ))
 
 
 @router.post("/{name}/retire", response_model=VersionDetail, summary="Stop routing to it")

@@ -64,6 +64,8 @@ def test_the_whole_lifecycle(client):
     assert listed == [{
         "name": "till", "display_name": None, "status": "active",
         "active_version": 1, "latest_published": 1, "drafts": [],
+        # A new processor: nobody may use it until access is granted.
+        "available_to_all": False, "granted": 0,
     }]
 
     assert client.post("/processors/till/retire").json()["is_active"] is False

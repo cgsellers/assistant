@@ -15,10 +15,10 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from pydantic import ValidationError
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from core.models import DocumentTypeDefinition
+from core.models import DocumentTypeDefinition, Processor, ProcessorAccess
 from doctypes.definition import Definition, Profile
 from doctypes.schema import match_evidence, select_profile
 
@@ -64,9 +64,13 @@ def clear_cache() -> None:
     _PARSED.clear()
 
 
-def active_definitions(session: Session) -> list[Definition]:
+def active_definitions(
+    session: Session, organisation_id: str | None = None
+) -> list[Definition]:
     """
-    Every type new documents can currently route to.
+    Every type new documents can currently route to -- for one organisation,
+    or, with None, regardless of who may use them (the eval harness, the
+    team's own tools).
 
     Unpublished rows are excluded because a type an analyst is still authoring
     against sample documents must not start catching live traffic halfway
@@ -74,32 +78,66 @@ def active_definitions(session: Session) -> list[Definition]:
 
     Ordered by name so that routing ties break the same way every run.
     """
-    rows = session.scalars(
-        select(DocumentTypeDefinition)
+    return [candidate.definition for candidate in candidates(session, organisation_id)]
+
+
+@dataclass(frozen=True, slots=True)
+class Candidate:
+    definition: Definition
+    #: Granted to this organisation specifically, rather than everyone's.
+    #: Wins an exact tie against a shared processor (DESIGN §9.3).
+    dedicated: bool = False
+
+
+def candidates(session: Session, organisation_id: str | None = None) -> list[Candidate]:
+    """
+    The live versions an organisation's documents may route to: processors
+    available to every organisation, plus those granted to this one. A
+    processor nobody has been given access to routes nothing.
+    """
+    stmt = (
+        select(DocumentTypeDefinition, Processor.available_to_all)
+        .join(Processor, Processor.name == DocumentTypeDefinition.name)
         .where(
             DocumentTypeDefinition.is_active.is_(True),
             DocumentTypeDefinition.is_published.is_(True),
         )
         .order_by(DocumentTypeDefinition.name)
-    ).all()
+    )
+    if organisation_id is not None:
+        granted = (
+            select(ProcessorAccess.processor_name)
+            .where(
+                ProcessorAccess.processor_name == Processor.name,
+                ProcessorAccess.organisation_id == organisation_id,
+            )
+            .exists()
+        )
+        stmt = stmt.where(or_(Processor.available_to_all.is_(True), granted))
 
-    definitions = []
-    for row in rows:
+    found = []
+    for row, available_to_all in session.execute(stmt):
         definition = _parse(row)
         if definition is not None:
-            definitions.append(definition)
-    return definitions
+            dedicated = organisation_id is not None and not available_to_all
+            found.append(Candidate(definition, dedicated))
+    return found
 
 
-def route(session: Session, ocr_text: str) -> RouteResult | None:
+def route(
+    session: Session, ocr_text: str, organisation_id: str | None = None
+) -> RouteResult | None:
     """
     Pick the document type this text looks most like, or None.
+
+    Among the processors `organisation_id` may use; None considers every live
+    one, for callers that are not routing a client's document.
 
     None is an ordinary outcome, not an error: it means no registered type
     cleared its own `min_score`, and the caller should escalate to a model
     classifier (or mark the document unsupported) rather than guess.
     """
-    picked = pick(active_definitions(session), ocr_text)
+    picked = pick(candidates(session, organisation_id), ocr_text)
     if picked is None:
         return None
     best, best_score = picked
@@ -115,41 +153,49 @@ def route(session: Session, ocr_text: str) -> RouteResult | None:
     )
 
 
-def scores(session: Session, ocr_text: str) -> dict[str, dict[str, float]]:
+def scores(
+    session: Session, ocr_text: str, organisation_id: str | None = None
+) -> dict[str, dict[str, float]]:
     """
-    Every active type's evidence for this text: {name: {"hits": n, "score": s}}.
+    Every routable type's evidence for this text: {name: {"hits": n, "score": s}}.
 
     Recorded with the routing decision, because the winner's score alone does
     not explain a wrong route ("invoice 2 signals, receipt 3") and an
     unsupported document -- where nobody won -- would otherwise keep nothing.
+    Only the types this organisation may use: those were the choice.
     """
     return {
         d.name: dict(zip(("hits", "score"), match_evidence(d, ocr_text), strict=True))
-        for d in active_definitions(session)
+        for d in active_definitions(session, organisation_id)
     }
 
 
-def pick(definitions: list[Definition], ocr_text: str) -> tuple[Definition, float] | None:
+def pick(
+    options: list[Definition] | list[Candidate], ocr_text: str
+) -> tuple[Definition, float] | None:
     """
     The winning type and its score, or None. Pure, so it can be run over a
     corpus without a database.
 
-    Most signals hit wins; the share of the type's own signals breaks a tie.
-    Ranking by share alone made a type lose for having more keywords -- see
-    `match_evidence`.
+    Most signals hit wins; the share of the type's own signals breaks a tie;
+    a processor dedicated to the organisation breaks an exact tie with a
+    shared one. Ranking by share alone made a type lose for having more
+    keywords -- see `match_evidence`.
     """
     best: Definition | None = None
-    best_key = (0, 0.0)
+    best_key: tuple = (0, 0.0, False)
 
-    for definition in definitions:
-        hits, score = match_evidence(definition, ocr_text)
+    for option in options:
+        candidate = option if isinstance(option, Candidate) else Candidate(option)
+        hits, score = match_evidence(candidate.definition, ocr_text)
+        key = (hits, score, candidate.dedicated)
         # match_evidence has already applied this type's own min_score and
         # returned zeros below it, so anything surviving a strict `>` against
         # a zero floor is a real match. Strict rather than >= also means a tie
         # keeps the first type in name order, which makes routing reproducible
         # instead of dependent on row insertion order.
-        if (hits, score) > best_key:
-            best, best_key = definition, (hits, score)
+        if hits and key > best_key:
+            best, best_key = candidate.definition, key
 
     return None if best is None else (best, best_key[1])
 

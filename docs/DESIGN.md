@@ -1919,6 +1919,33 @@ document, and raw SQL as the application role with no scope set sees zero rows.
 SQLite has no row-level security; there the application layer is the only lock, and SQLite
 runs only on laptops and in the fast test run.
 
+**4.4, per-client behaviour.** A `processors` table now holds what belongs to a processor
+rather than to a version, which today is who may use it. Every version references one, by
+foreign key. A processor is for every organisation or for those granted it in
+`processor_access`; access isn't versioned, so taking it away takes effect on the next
+document routed.
+
+- **Nobody, until granted.** A new processor routes nothing. The panel lists it as
+  "nobody", and a live one with no access gets a warning on its page. The migration made
+  every processor that already existed available to everyone, so nothing that routed
+  before stopped. The starter seeds create theirs the same way.
+- **A document routes only among what its organisation may use.** The routing record
+  holds only those processors' scores, because those were the choice. The eval harness
+  and trials on loose text still route among every live processor; a trial on a stored
+  document routes as that document would, and says when its organisation could never be
+  routed to the version being tried.
+- **On an exact tie a processor dedicated to the client wins** over a shared one: the
+  third key in the ranking, after signals hit and share. It's a tie-break, not a
+  preference: a shared processor that matches better still wins. Removing it fails
+  exactly the two tests that pin it.
+- **Admins change access**, in the panel or with `PUT /processors/{name}/access` (by slug).
+  Authors can read it. Grants that stay keep their original date and author; the
+  processor records who last changed it.
+- **The cost report splits spend by organisation** for staff. A client's own report,
+  through `GET /costs`, contains only theirs, because the session's scope already said
+  so. `core.costs --client acme` reports one client. **The analyst** answers from
+  whichever ledger its session is scoped to, which a test pins rather than new code.
+
 ### 9.2 Why Postgres
 
 SQLite was right for getting started: nothing to run, and a suite of several hundred

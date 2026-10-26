@@ -10,7 +10,7 @@ from decimal import Decimal
 import pytest
 
 from core import repository
-from core.models import DocumentTypeDefinition, Extraction
+from core.models import DocumentTypeDefinition, Extraction, Processor
 from doctypes import registry
 from doctypes.definition import Definition, FieldSpec, FieldType, Matchers, Profile
 
@@ -63,6 +63,13 @@ def _receipt() -> Definition:
         "receipt",
         keywords=["total", "iva", "ticket", "gracias por su compra"],
     )
+
+
+def _processor(session, name: str) -> None:
+    """The processor row a version needs, for tests that write versions by hand."""
+    if session.get(Processor, name) is None:
+        session.add(Processor(name=name, available_to_all=True))
+        session.flush()
 
 
 def _register(session, definition: Definition, **kwargs) -> DocumentTypeDefinition:
@@ -197,6 +204,7 @@ class TestRouting:
     def test_inactive_type_does_not_win_even_scoring_higher(self, session):
         """A retired type outscores the live one; routing must still ignore it."""
         _register(session, _receipt())
+        _processor(session, "invoice")
         session.add(
             DocumentTypeDefinition(
                 name="invoice",
@@ -215,6 +223,7 @@ class TestRouting:
     def test_unpublished_draft_does_not_win(self, session):
         _register(session, _receipt())
         # A draft of a better-matching type, mid-authoring.
+        _processor(session, "invoice")
         row = DocumentTypeDefinition(
             name="invoice",
             version=1,
@@ -232,6 +241,7 @@ class TestRouting:
 
 class TestMalformedDefinitions:
     def _add_broken_row(self, session) -> None:
+        _processor(session, "broken")
         session.add(
             DocumentTypeDefinition(
                 name="broken",

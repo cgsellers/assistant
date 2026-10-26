@@ -140,3 +140,9 @@ ol.timeline li::before { content: ""; position: absolute; left: -6px; top: 0.75r
 ol.timeline .detail { font-size: 0.88rem; margin-top: 0.2rem; display: flex; flex-wrap: wrap; gap: 0.25rem 1rem; }
 ol.timeline .detail table, ol.timeline .detail ul { flex-basis: 100%; }
 table.scores { max-width: 420px; }
+
+/* Processor access */
+.access .choice { display: block; font-weight: 400; margin: 0.3rem 0; }
+.access .choice input { display: inline; width: auto; margin: 0 0.4rem 0 0; }
+.access .organisations { margin-left: 1.5rem; }
+.warn { color: var(--warn); }

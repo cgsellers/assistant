@@ -276,8 +276,9 @@ def run_extract_job(session: Session, job: Job, extractor: Extractor) -> None:
     # Rows rebuilt from the stored boxes, not the engine's flattened text: on a
     # two-column receipt the flat order pairs names with the wrong prices.
     text = extraction_text(ocr.full_text or "", blocks_from_json(ocr.layout_blocks))
-    match = registry.route(session, text)
-    evidence = registry.scores(session, text)
+    # Among the processors this document's organisation may use (DESIGN §9.3).
+    match = registry.route(session, text, document.organisation_id)
+    evidence = registry.scores(session, text, document.organisation_id)
     if match is None:
         # Not a failure. No registered type cleared its own min_score, so there
         # is nothing to extract against. A model classifier for this case is

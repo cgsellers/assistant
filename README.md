@@ -431,7 +431,9 @@ uv run uvicorn api.main:app --reload
 # docs at http://127.0.0.1:8000/docs, the panel at /panel, health check at /health
 ```
 
-Clients are organisations: `uv run python -m core.tenancy create "Acme Ltd" acme`, then
+Each processor is for every organisation or only the ones granted it; a new one is for
+nobody until an admin says otherwise, on its panel page. Clients are organisations:
+`uv run python -m core.tenancy create "Acme Ltd" acme`, then
 `--client acme` on the two commands above for that client's user or ERP key. Without it,
 users are the Ledgerline team (staff, who see every organisation) and keys belong to the
 team's own organisation, "Ledgerline demo".

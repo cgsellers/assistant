@@ -308,6 +308,52 @@ Index("ix_jobs_poll", Job.status, Job.run_after)
 # ---------------------------------------------------------------------------
 
 
+class Processor(Base):
+    """
+    One processor -- a document type -- as distinct from its versions.
+
+    What belongs to the processor rather than to any version lives here, and
+    today that is who may use it (DESIGN §9.3). Access is not versioned: it
+    says who, not what, and taking a client's access away must not wait for a
+    new version to be published.
+
+    Either every organisation may use it (the generic invoice), or only those
+    granted in `processor_access` (a client's dedicated receipt processor). A
+    new processor starts with neither -- nobody -- so one written for a single
+    client cannot reach everyone because nobody restricted it.
+    """
+
+    __tablename__ = "processors"
+
+    name: Mapped[str] = mapped_column(String(50), primary_key=True)
+    available_to_all: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=text("false")
+    )
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    #: The last change to who may use it, and who made it.
+    access_changed_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    access_changed_by: Mapped[str | None] = mapped_column(String(320))
+
+    grants: Mapped[list[ProcessorAccess]] = relationship(
+        cascade="all, delete-orphan", order_by="ProcessorAccess.granted_at"
+    )
+
+
+class ProcessorAccess(Base):
+    """One organisation allowed to use a processor that is not everyone's."""
+
+    __tablename__ = "processor_access"
+
+    processor_name: Mapped[str] = mapped_column(
+        ForeignKey("processors.name"), primary_key=True
+    )
+    organisation_id: Mapped[str] = mapped_column(
+        ForeignKey("organisations.id"), primary_key=True, index=True
+    )
+    granted_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    granted_by: Mapped[str | None] = mapped_column(String(320))
+
+
 class DocumentTypeDefinition(Base):
     """
     A document type, stored as data rather than code.
@@ -327,7 +373,8 @@ class DocumentTypeDefinition(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     #: Stable identifier stored on extractions.doc_type. Never rename it.
-    name: Mapped[str] = mapped_column(String(50), index=True)
+    #: Every version belongs to a processor, which holds who may use it.
+    name: Mapped[str] = mapped_column(ForeignKey("processors.name"), index=True)
     version: Mapped[int] = mapped_column(Integer, default=1)
 
     display_name: Mapped[str | None] = mapped_column(String(200))

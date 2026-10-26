@@ -22,6 +22,10 @@ they are reported beside the total rather than inside it.
 **Scope:** extraction only. The analyst agent reports its cost on each
 `Answer` but does not persist it, so its spend is not here.
 
+**Whose:** the session's (core/scoping.py). Through `GET /costs` a client sees
+their own spend and staff see everyone's, split by organisation; the command
+line reports every organisation, or one with `--client`.
+
 Run it with:  uv run python -m core.costs --since 2026-10-01
 """
 
@@ -37,7 +41,7 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from core.models import Extraction
+from core.models import Extraction, Organisation
 
 ZERO = Decimal("0")
 
@@ -76,6 +80,9 @@ class CostReport:
     latency_p95_ms: int | None = None
     by_model: list[Slice] = field(default_factory=list)
     by_doc_type: list[Slice] = field(default_factory=list)
+    #: Spend per client -- what billing a client would start from. A client's
+    #: own report has one entry: the session's scope sees only theirs.
+    by_organisation: list[Slice] = field(default_factory=list)
 
     @property
     def per_document_usd(self) -> Decimal:
@@ -108,6 +115,7 @@ class CostReport:
             "latency_ms": {"p50": self.latency_p50_ms, "p95": self.latency_p95_ms},
             "by_model": [s.as_dict() for s in self.by_model],
             "by_doc_type": [s.as_dict() for s in self.by_doc_type],
+            "by_organisation": [s.as_dict() for s in self.by_organisation],
         }
 
 
@@ -160,6 +168,7 @@ def cost_report(
         stmt = stmt.where(Extraction.created_at <= datetime.combine(until, time.max))
 
     everything = list(session.scalars(stmt))
+    names = dict(session.execute(select(Organisation.id, Organisation.name)).all())
     trials = [r for r in everything if r.is_trial]
     rows = [r for r in everything if not r.is_trial]
 
@@ -195,6 +204,7 @@ def cost_report(
         latency_p95_ms=_percentile(latencies, 0.95),
         by_model=_slices(rows, lambda r: r.model_used),
         by_doc_type=_slices(rows, lambda r: r.doc_type),
+        by_organisation=_slices(rows, lambda r: names.get(r.organisation_id, r.organisation_id)),
     )
 
 
@@ -235,7 +245,11 @@ def format_report(report: CostReport) -> str:
         lines.append(
             f"  latency          p50 {report.latency_p50_ms}ms · p95 {report.latency_p95_ms}ms"
         )
-    for title, slices in (("by model", report.by_model), ("by type", report.by_doc_type)):
+    for title, slices in (
+        ("by organisation", report.by_organisation),
+        ("by model", report.by_model),
+        ("by type", report.by_doc_type),
+    ):
         lines += ["", f"  {title}"]
         lines += [
             f"    {s.key:<32} {s.calls:>5} call(s)   ${_usd(s.total_usd)}" for s in slices
@@ -248,14 +262,23 @@ def main() -> None:
     parser.add_argument("--since", type=date.fromisoformat, default=None)
     parser.add_argument("--until", type=date.fromisoformat, default=None)
     parser.add_argument("--json", action="store_true")
+    parser.add_argument("--client", metavar="SLUG", help="one organisation's spend only")
     args = parser.parse_args()
 
     from core.db import SessionLocal
     from core.scoping import Scope, set_scope
 
     with SessionLocal() as session:
-        # An operator's command: every organisation's spend.
-        set_scope(session, Scope.everyone("core.costs"))
+        # An operator's command: every organisation's spend, or one client's.
+        if args.client:
+            from core import tenancy
+
+            organisation = tenancy.by_slug(session, args.client)
+            if organisation is None:
+                raise SystemExit(f"no organisation called {args.client!r}")
+            set_scope(session, Scope.of(organisation.id, f"core.costs --client {args.client}"))
+        else:
+            set_scope(session, Scope.everyone("core.costs"))
         report = cost_report(session, since=args.since, until=args.until)
     print(json.dumps(report.as_dict(), indent=2) if args.json else format_report(report))
 

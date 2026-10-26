@@ -226,6 +226,7 @@ class TestOpenApi:
             "/processors/{name}/versions/{version}",
             "/processors/{name}/versions/{version}/publish",
             "/processors/{name}/retire",
+            "/processors/{name}/access",
             "/processors/{name}/versions/{version}/trial",
             "/processors/{name}/versions/{version}/trial/file",
         }

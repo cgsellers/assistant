@@ -21,6 +21,7 @@ from core.models import (
     Extraction,
     Job,
     OcrResult,
+    Processor,
     Transaction,
 )
 from core.status import DocStatus, JobKind
@@ -157,6 +158,7 @@ def create_document_type_version(
     activate: bool = True,
     created_by: str | None = None,
     based_on_version: int | None = None,
+    available_to_all: bool = False,
 ) -> DocumentTypeDefinition:
     """
     Write a new version of a document type.
@@ -181,6 +183,13 @@ def create_document_type_version(
         # would take the flag off a working type and then catch nothing: the
         # type silently stops routing. Refuse instead of producing that state.
         raise ValueError("cannot activate an unpublished version")
+
+    # The processor itself, on its first version. Nobody may use a new one
+    # until access is granted (DESIGN §9.3) -- except where the caller says
+    # it is shared, which only the starter seeds do.
+    if session.get(Processor, definition.name) is None:
+        session.add(Processor(name=definition.name, available_to_all=available_to_all))
+        session.flush()
 
     highest = session.scalar(
         select(func.max(DocumentTypeDefinition.version)).where(

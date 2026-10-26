@@ -39,6 +39,14 @@ RECEIPT = OcrOutput(
 )
 
 
+def _shared(session, definition, **kwargs):
+    """A processor every organisation may use, as the starter seeds are."""
+    return repository.create_document_type_version(
+        session, definition, available_to_all=True, **kwargs
+    )
+
+
+
 @pytest.fixture(autouse=True)
 def _cold_registry():
     """Parsed definitions outlive a tmp_path database, so start each test cold."""
@@ -69,7 +77,7 @@ def run_worker(session_factory, monkeypatch):
 
 @pytest.fixture
 def registered_receipt(session):
-    return repository.create_document_type_version(session, receipt_definition())
+    return _shared(session, receipt_definition())
 
 
 class TestHappyPath:
