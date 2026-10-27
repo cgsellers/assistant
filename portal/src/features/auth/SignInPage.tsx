@@ -1,6 +1,7 @@
 import { type FormEvent, useState } from "react";
 import { Navigate, useNavigate, useSearchParams } from "react-router";
 import { Logo } from "@/components/logo";
+import { DEMO, MOCKS, MockBadge } from "@/components/mock-notice";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -42,6 +43,26 @@ export function SignInPage() {
         <Card className="p-8">
           <h1 className="text-xl font-semibold tracking-tight">Sign in</h1>
           <p className="mt-1 text-sm text-muted">Your documents, and what was read from them.</p>
+          {MOCKS && (
+            <div className="mt-5 rounded-md border border-attention/25 bg-attention-soft/60 px-3 py-2.5 text-sm">
+              <MockBadge />
+              <p className="mt-1.5 text-ink-soft">
+                Demo account: <span className="font-medium">{DEMO.email}</span>, password{" "}
+                <span className="font-medium">{DEMO.password}</span>
+              </p>
+              <Button
+                variant="secondary"
+                size="sm"
+                className="mt-2"
+                onClick={() => {
+                  setEmail(DEMO.email);
+                  setPassword(DEMO.password);
+                }}
+              >
+                Fill in the demo account
+              </Button>
+            </div>
+          )}
           <form className="mt-6 space-y-4" onSubmit={submit}>
             <div className="space-y-1.5">
               <Label htmlFor="email">Email</Label>

@@ -1,6 +1,7 @@
 import { Building2, ChevronDown, LogOut } from "lucide-react";
 import { NavLink, Outlet, useNavigate } from "react-router";
 import { Logo } from "@/components/logo";
+import { MockBadge } from "@/components/mock-notice";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -27,9 +28,12 @@ export function AppShell() {
     <div className="min-h-screen">
       <header className="sticky top-0 z-40 border-b border-line bg-surface/90 backdrop-blur">
         <div className="mx-auto flex h-14 max-w-7xl items-center gap-8 px-6">
-          <NavLink to="/documents" aria-label="Ledgerline home">
-            <Logo />
-          </NavLink>
+          <div className="flex items-center gap-2">
+            <NavLink to="/documents" aria-label="Ledgerline home">
+              <Logo />
+            </NavLink>
+            <MockBadge />
+          </div>
           <nav className="flex items-center gap-1">
             {NAV.map((item) => (
               <NavLink

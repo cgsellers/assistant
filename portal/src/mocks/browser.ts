@@ -1,8 +1,6 @@
 import { setupWorker } from "msw/browser";
-import { handlers, setSignedIn } from "./handlers";
+import { handlers } from "./handlers";
 
-// In mock mode the person starts signed out, as in production: sign in as
-// bo@acme.test with the password in handlers.ts.
-setSignedIn(false);
-
+// The mock API in the browser (`npm run dev:mocks`). Sign in with the demo
+// account the sign-in page offers; see src/mocks/user.ts.
 export const worker = setupWorker(...handlers);

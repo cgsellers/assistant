@@ -11,11 +11,15 @@ import { MOCK_PASSWORD, MOCK_USER } from "./user";
  */
 export { MOCK_PASSWORD, MOCK_USER };
 
-let signedIn = false;
+// Kept in sessionStorage, like a session cookie: a reload keeps you signed in,
+// closing the tab does not. Tests have their own, reset after each one.
+const SIGNED_IN = "ledgerline-mock-signed-in";
+let signedIn = globalThis.sessionStorage?.getItem(SIGNED_IN) === "yes";
 
 /** Tests start signed out unless they say otherwise. */
 export function setSignedIn(value: boolean) {
   signedIn = value;
+  globalThis.sessionStorage?.setItem(SIGNED_IN, value ? "yes" : "no");
 }
 
 export const handlers = [
@@ -31,14 +35,14 @@ export const handlers = [
     if (body.email !== MOCK_USER.name || body.password !== MOCK_PASSWORD) {
       return HttpResponse.json({ detail: "wrong email or password" }, { status: 401 });
     }
-    signedIn = true;
+    setSignedIn(true);
     return HttpResponse.json(MOCK_USER);
   }),
   http.post("/api/auth/logout", ({ request }) => {
     if (request.headers.get("x-csrf-token") !== MOCK_USER.csrf_token) {
       return HttpResponse.json({ detail: "missing or wrong CSRF token" }, { status: 403 });
     }
-    signedIn = false;
+    setSignedIn(false);
     return new HttpResponse(null, { status: 204 });
   }),
 ];
