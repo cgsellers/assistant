@@ -26,7 +26,11 @@ export const routes = [
         lazy: () =>
           import("@/features/documents/DocumentPage").then((m) => ({ Component: m.DocumentPage })),
       },
-      { path: "upload", element: <Placeholder title="Upload" step="5.5" /> },
+      {
+        path: "upload",
+        lazy: () =>
+          import("@/features/upload/UploadPage").then((m) => ({ Component: m.UploadPage })),
+      },
       { path: "settings", element: <Placeholder title="Settings" step="5.6" /> },
     ],
   },

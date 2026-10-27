@@ -7,7 +7,7 @@ import type {
   Location,
   ScalarField,
 } from "@/api/contract";
-import { amountFor, SUPPLIERS as ROSTER } from "./documents";
+import { amountFor, MOCK_DOCUMENTS, SUPPLIERS as ROSTER } from "./documents";
 
 /**
  * What each mock document says: the sale behind it, as printed on the
@@ -457,4 +457,18 @@ export function check(kind: Sale["kind"], read: Field[]): { fields: Field[]; pro
     }
   }
   return { fields, problems };
+}
+
+/**
+ * A processor's fields with nothing read: what the mock shows for an upload,
+ * which it cannot really read. Required fields then flag themselves.
+ */
+export function blankFields(kind: Sale["kind"]): Field[] {
+  const example = MOCK_DOCUMENTS[kind === "invoice" ? 1 : 2] as DocumentRow;
+  return readFrom(saleFor(example), new Map()).map(
+    (field): Field =>
+      field.type === "list"
+        ? { ...field, rows: [], row_locations: [] }
+        : { ...field, value: null, location: null },
+  );
 }

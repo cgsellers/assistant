@@ -1,6 +1,7 @@
 import { HttpResponse, http } from "msw";
 import { singleDocumentHandlers } from "./document";
-import { documentHandlers } from "./documents";
+import { listingHandlers } from "./listing";
+import { uploadHandlers } from "./uploads";
 import { MOCK_PASSWORD, MOCK_USER } from "./user";
 
 /**
@@ -26,8 +27,9 @@ export const handlers = [
   // Only the mock answers this: the sign-in page asks it to show whether the
   // mock API is really answering in this tab, or requests reach the real one.
   http.get("/api/__mock", () => HttpResponse.json({ mock: true })),
-  ...documentHandlers,
+  ...listingHandlers,
   ...singleDocumentHandlers,
+  ...uploadHandlers,
   http.get("/api/auth/me", () =>
     signedIn
       ? HttpResponse.json(MOCK_USER)

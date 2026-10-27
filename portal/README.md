@@ -12,7 +12,7 @@ npm run api          # regenerate src/api/schema.d.ts after a backend change
 npm test && npm run lint && npm run typecheck && npm run build
 ```
 
-With `dev:mocks`, sign in as `bo@acme.test` with the password `correct horse battery`.
+With `dev:mocks`, the sign-in page offers the demo account (`bo@acme.test`, password `correct horse battery`) and checks that the mock API is really answering in the tab; a "Mock data" badge stays in the header.
 
 ## Layout
 
@@ -23,7 +23,7 @@ With `dev:mocks`, sign in as `bo@acme.test` with the password `correct horse bat
 | `src/mocks/` | MSW handlers, shared by the browser (`dev:mocks`) and the tests. They are the contract. |
 | `src/mocks/files.ts` | The mock originals: each invoice a generated PDF, each receipt a canvas-drawn photo, matching its fields. |
 | `src/components/ui/` | Buttons, inputs, tables and menus, on Radix primitives. Our own code, not a dependency. |
-| `src/features/` | One folder per area: `auth`, `documents` (the list, and one document with its viewer in `viewer/`). |
+| `src/features/` | One folder per area: `auth`; `documents` (the list, one document, its viewer in `viewer/`, review and correction); `upload` (the queue, which outlives the page). |
 | `src/lib/` | The API client, formatting of money and dates, small helpers. |
 
 Tests render the real routes against the mock API (`src/test/render.tsx`), and any

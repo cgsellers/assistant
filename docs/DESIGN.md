@@ -2142,6 +2142,35 @@ the first real Safari found two things.
   check, a "Mock data" badge and a button that fills in the demo account, and the mock
   session now survives a reload. None of it reaches a production build.
 
+**5.5 built: upload.** Against the API's real `POST /documents`, so this screen uses the
+generated types and needs no new contract.
+- **Many files at once**, chosen, dropped or pasted. Each gets a row with real progress.
+  `XMLHttpRequest` is used rather than `fetch`, which cannot report upload progress.
+  Three go at a time.
+- **Uploads outlive the page.** The queue lives outside the routes, so you can go back to
+  Documents while it works. A header pill says "Uploading 2 of 5", the list refreshes as
+  each document lands, and closing the tab mid-upload asks first.
+- **Each row follows its document** through received, being read, then Ready or Needs
+  review, with a link to open it. It polls the same `GET /documents/{id}/fields` as the
+  document page. A re-upload of the same bytes shows "Already uploaded" and links to the
+  original: the API deduplicates by SHA-256, per organisation.
+- **Refused and failed are different things.** Refused means it won't go through as it
+  is: too large, not an image or PDF. Most of this is caught before sending, and the
+  server's own message is shown when it refuses (it judges the type by the bytes, not
+  the name). Failed means it might go through next time: a dropped connection, an
+  ended session, a server error. Only those offer Retry.
+- **Mock uploads are honest.** The mock can't read a file, so an upload is "being read"
+  for a few seconds and then waits in review with nothing filled in, under a plain note
+  saying so. Filling it in exercises the correction flow on your own file. The mock
+  endpoint answers as the API does: CSRF, empty, size, type by magic bytes, and
+  deduplication by SHA-256. It reads the multipart body itself, because Node's
+  `formData()` throws under jsdom, which replaces the global `File`.
+- **Until the backend has `/fields`**, a real upload goes through but its row waits at
+  "being read".
+- **Checked in WebKit, with screenshots:** uploads through the real file input; the
+  receipt photo with its highlight landing on the printed total; the invoice highlight;
+  the list; the editor refusing `1,234`.
+
 ### 9.2 Why Postgres
 
 SQLite was right for getting started: nothing to run, and a suite of several hundred

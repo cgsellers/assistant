@@ -11,6 +11,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useMe, useSignOut } from "@/features/auth/session";
+import { UploadIndicator, useUploadsEverywhere } from "@/features/upload/UploadIndicator";
 import { cn } from "@/lib/utils";
 
 const NAV = [
@@ -23,6 +24,7 @@ export function AppShell() {
   const me = useMe();
   const signOut = useSignOut();
   const navigate = useNavigate();
+  useUploadsEverywhere();
 
   return (
     <div className="min-h-screen">
@@ -50,7 +52,8 @@ export function AppShell() {
               </NavLink>
             ))}
           </nav>
-          <div className="ml-auto">
+          <div className="ml-auto flex items-center gap-3">
+            <UploadIndicator />
             <DropdownMenu>
               <DropdownMenuTrigger className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-ink-soft hover:bg-working-soft">
                 <Building2 className="size-4 text-muted" />

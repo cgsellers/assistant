@@ -1,6 +1,7 @@
 import { HttpResponse, http } from "msw";
 import type {
   DocumentFields,
+  DocumentRow,
   Field,
   FieldsPatch,
   FieldType,
@@ -9,9 +10,10 @@ import type {
   ScalarField,
 } from "@/api/contract";
 import { type Saved, save, savedFor } from "./corrections";
-import { MOCK_DOCUMENTS } from "./documents";
+import { MOCK_DOCUMENTS, TYPES } from "./documents";
 import { invoiceLocations, invoicePdf, receiptLocations, receiptPhoto } from "./files";
-import { check, readFrom, saleFor } from "./sales";
+import { blankFields, check, readFrom, saleFor } from "./sales";
+import { READ_DELAY, uploadFor } from "./uploads";
 import { hasCsrf, MOCK_USER } from "./user";
 
 /** One document: its fields as the portal shows them, its original, and corrections. */
@@ -45,18 +47,75 @@ function corrected(read: Field[], saved: Saved | undefined): Field[] {
   });
 }
 
-export function fieldsFor(id: string): DocumentFields | null {
+/** Where a document comes from, before corrections and rules: the mock list, or an upload. */
+interface Source {
+  row: DocumentRow;
+  mime: string;
+  size: number;
+  kind: "invoice" | "receipt";
+  /** Fields as read, or null while it is still being read (or never will be). */
+  read: (() => Field[]) | null;
+  readAt: string;
+  /** Problems the rules would not find, such as the mock's note on uploads. */
+  notes: string[];
+}
+
+/** What the mock says about an upload, which it cannot really read. */
+export const UPLOAD_NOTE =
+  "Mock data: nothing is really read from an upload. Fill in the fields to try a correction.";
+
+function sourceFor(id: string): Source | null {
+  const upload = uploadFor(id);
+  if (upload) {
+    const { out } = upload;
+    const kind = out.mime_type === "application/pdf" ? "invoice" : "receipt";
+    const readAt = new Date(Date.parse(out.uploaded_at) + READ_DELAY()).toISOString();
+    const read = Date.now() >= Date.parse(readAt);
+    return {
+      row: {
+        id: out.id,
+        filename: out.original_filename,
+        received_at: out.uploaded_at,
+        document_date: null,
+        supplier: null,
+        type: read ? (TYPES.find((t) => t.name === kind) ?? null) : null,
+        total: null,
+        outcome: read ? "needs_review" : "processing",
+      },
+      mime: out.mime_type,
+      size: out.size_bytes,
+      kind,
+      read: read ? () => blankFields(kind) : null,
+      readAt,
+      notes: savedFor(id) ? [] : [UPLOAD_NOTE],
+    };
+  }
   const row = MOCK_DOCUMENTS.find((d) => d.id === id);
   if (!row) return null;
   const sale = saleFor(row);
-  const document = {
-    ...row,
-    mime_type: sale.kind === "invoice" ? "application/pdf" : "image/jpeg",
-    size_bytes: sale.kind === "invoice" ? 2400 + sale.index * 13 : 48000 + sale.index * 731,
+  const readable = row.outcome === "done" || row.outcome === "needs_review";
+  return {
+    row,
+    mime: sale.kind === "invoice" ? "application/pdf" : "image/jpeg",
+    size: sale.kind === "invoice" ? 2400 + sale.index * 13 : 48000 + sale.index * 731,
+    kind: sale.kind,
+    read: readable
+      ? () =>
+          readFrom(sale, sale.kind === "invoice" ? invoiceLocations(sale) : receiptLocations(sale))
+      : null,
+    readAt: new Date(Date.parse(row.received_at) + 41_000).toISOString(),
+    notes: [],
   };
+}
+
+export function fieldsFor(id: string): DocumentFields | null {
+  const source = sourceFor(id);
+  if (!source) return null;
+  const { row, kind } = source;
+  const document = { ...row, mime_type: source.mime, size_bytes: source.size };
   const received = { at: row.received_at, what: "Received", by: null };
 
-  if (row.outcome !== "done" && row.outcome !== "needs_review") {
+  if (!source.read) {
     return {
       document,
       processor: null,
@@ -70,39 +129,38 @@ export function fieldsFor(id: string): DocumentFields | null {
   }
 
   const saved = savedFor(id);
-  const where = sale.kind === "invoice" ? invoiceLocations(sale) : receiptLocations(sale);
-  const { fields, problems } = check(sale.kind, corrected(readFrom(sale, where), saved));
+  const checked = check(kind, corrected(source.read(), saved));
+  const fields = checked.fields;
+  const problems = [...source.notes, ...checked.problems];
   const value = (name: string) => {
     const field = fields.find((f): f is ScalarField => f.name === name && f.type !== "list");
     return field?.value ?? null;
   };
   const flagged = problems.length > 0 || fields.some((f) => f.problem);
-  const readAt = new Date(Date.parse(row.received_at) + 41_000).toISOString();
-  const processor = PROCESSORS[sale.kind];
+  const processor = PROCESSORS[kind];
   const total = value("total");
+  const currency = (value("currency") as string | null) ?? null;
+  // What it was first held for, before anyone changed anything.
+  const firstHeld = source.notes.length > 0 || row.outcome === "needs_review";
   return {
     document: {
       ...document,
       outcome: flagged && !saved?.approved ? "needs_review" : "done",
       supplier: (value("vendor") as string | null) ?? null,
       document_date: (value("issued_on") as string | null) ?? null,
-      total:
-        total === null
-          ? null
-          : { amount: String(total), currency: (value("currency") as string | null) ?? null },
+      type: TYPES.find((t) => t.name === kind) ?? null,
+      total: total === null ? null : { amount: String(total), currency },
     },
     processor,
-    currency: (value("currency") as string | null) ?? sale.currency,
+    currency,
     fields,
     problems,
-    read_at: readAt,
+    read_at: source.readAt,
     revision: saved?.revision ?? 1,
     history: [
       received,
-      { at: readAt, what: `Read as ${processor.label.toLowerCase()}`, by: null },
-      ...(row.outcome === "needs_review"
-        ? [{ at: readAt, what: "Held for review", by: null }]
-        : []),
+      { at: source.readAt, what: `Read as ${processor.label.toLowerCase()}`, by: null },
+      ...(firstHeld ? [{ at: source.readAt, what: "Held for review", by: null }] : []),
       ...(saved?.history ?? []),
     ],
   };
@@ -192,27 +250,35 @@ export const singleDocumentHandlers = [
           : []),
         ...(body.approve ? [{ at, what: "Approved as it is", by: MOCK_USER.name }] : []),
       ],
-      row: {},
     };
     save(id, saved);
-    const after = fieldsFor(id) as DocumentFields;
-    const { outcome, supplier, document_date, total } = after.document;
-    saved.row = { outcome, supplier, document_date, total };
-    return HttpResponse.json(after);
+    return HttpResponse.json(fieldsFor(id));
   }),
 
   http.get("/api/documents/:id/file", async ({ params }) => {
-    const row = MOCK_DOCUMENTS.find((d) => d.id === params.id);
-    if (!row) return refuse(404, "No such document");
-    const sale = saleFor(row);
-    const { bytes, type } =
-      sale.kind === "invoice"
-        ? { bytes: invoicePdf(sale), type: "application/pdf" }
-        : await receiptPhoto(sale);
-    return new HttpResponse(bytes, {
+    const id = String(params.id);
+    const upload = uploadFor(id);
+    const row = MOCK_DOCUMENTS.find((d) => d.id === id);
+    if (!upload && !row) return refuse(404, "No such document");
+    let file: { bytes: Uint8Array; type: string; name: string | null };
+    if (upload) {
+      file = {
+        bytes: upload.bytes,
+        type: upload.out.mime_type,
+        name: upload.out.original_filename,
+      };
+    } else {
+      const sale = saleFor(row as DocumentRow);
+      const drawn =
+        sale.kind === "invoice"
+          ? { bytes: invoicePdf(sale), type: "application/pdf" }
+          : await receiptPhoto(sale);
+      file = { ...drawn, name: (row as DocumentRow).filename };
+    }
+    return new HttpResponse(file.bytes as BodyInit, {
       headers: {
-        "Content-Type": type,
-        "Content-Disposition": `inline; filename="${row.filename ?? "document"}"`,
+        "Content-Type": file.type,
+        "Content-Disposition": `inline; filename="${file.name ?? "document"}"`,
       },
     });
   }),

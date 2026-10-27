@@ -1,4 +1,4 @@
-import type { DocumentRow, FieldValue, ListRow } from "@/api/contract";
+import type { FieldValue, ListRow } from "@/api/contract";
 
 /**
  * What people have changed, per document: the mock API's memory between
@@ -10,8 +10,6 @@ export interface Saved {
   approved: boolean;
   revision: number;
   history: { at: string; what: string; by: string | null }[];
-  /** How the document now looks in the list. */
-  row: Partial<DocumentRow>;
 }
 
 const store = new Map<string, Saved>();
