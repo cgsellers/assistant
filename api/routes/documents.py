@@ -4,16 +4,31 @@ from __future__ import annotations
 
 import binascii
 from base64 import b64decode
+from datetime import date
+from typing import Literal
 from urllib.parse import quote
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile, status
 from sqlalchemy.orm import Session
 
-from api.schemas import Base64Upload, DocumentDetail, DocumentOut, OcrResultOut, ResultOut
+from api.schemas import (
+    Base64Upload,
+    DocTypeOut,
+    DocumentDetail,
+    DocumentFieldsOut,
+    DocumentListOut,
+    DocumentOut,
+    DocumentSummaryOut,
+    OcrResultOut,
+    ResultOut,
+)
 from core import repository, storage, tenancy
 from core.auth import Principal, require_principal
 from core.config import get_settings
 from core.db import get_session
+from doctypes import listing
+from doctypes.fields import document_fields
 from doctypes.results import document_result
 
 router = APIRouter(prefix="/documents", tags=["documents"])
@@ -106,6 +121,129 @@ def upload_base64(
     return _ingest(session, organisation_id, data, payload.filename)
 
 
+# --- The list ---------------------------------------------------------------------
+# Declared before /{document_id}, which would otherwise take "summary", "types"
+# and "export" for document ids.
+
+
+Outcome = Literal["processing", "done", "needs_review", "unsupported", "failed"]
+Sort = Literal["received", "document_date"]
+
+
+def list_filters(
+    outcome: Outcome | None = Query(default=None, description="Only documents with this outcome"),
+    type: str | None = Query(
+        default=None, description="Only documents read as this processor (its name)"
+    ),
+    q: str | None = Query(
+        default=None, max_length=200, description="Matches the supplier or the file name"
+    ),
+    received_from: date | None = Query(
+        default=None, alias="from", description="Received on or after this day (in `tz`)"
+    ),
+    received_to: date | None = Query(
+        default=None, alias="to", description="Received on or before this day (in `tz`)"
+    ),
+    tz: str = Query(
+        default="UTC",
+        max_length=64,
+        description="The IANA time zone `from` and `to` are days in, e.g. Europe/Madrid",
+    ),
+) -> listing.Filters:
+    try:
+        zone = ZoneInfo(tz)
+    except (ZoneInfoNotFoundError, ValueError):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, f"Unknown time zone {tz!r}"
+        ) from None
+    return listing.Filters(
+        outcome=outcome,
+        doc_type=type,
+        q=q,
+        received_from=received_from,
+        received_to=received_to,
+        tz=zone,
+    )
+
+
+@router.get("", response_model=DocumentListOut, summary="List documents")
+def list_documents(
+    filters: listing.Filters = Depends(list_filters),
+    sort: Sort = Query(
+        default="received", description="Newest first, by when it arrived or by its own date"
+    ),
+    cursor: str | None = Query(
+        default=None, max_length=500, description="`next_cursor` from the page before"
+    ),
+    limit: int = Query(default=25, ge=1, le=100),
+    session: Session = Depends(get_session),
+) -> DocumentListOut:
+    """
+    The caller's documents, newest first, a page at a time: what each one is,
+    who issued it, its own date and total, and its outcome. Documents in review
+    show what was read from them.
+
+    Paged by cursor, which stays correct while new documents arrive. Pass
+    `next_cursor` back as `cursor`, with the same filters and sort.
+    """
+    try:
+        documents, next_cursor = listing.page(
+            session, filters, sort=sort, cursor=cursor, limit=limit
+        )
+    except listing.BadCursor as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from None
+    label = listing.labels(session, {d.doc_type for d in documents if d.doc_type})
+    return DocumentListOut.model_validate(
+        {"items": [listing.row(d, label) for d in documents], "next_cursor": next_cursor}
+    )
+
+
+@router.get(
+    "/summary", response_model=DocumentSummaryOut, summary="Count and total the documents"
+)
+def summarise_documents(
+    filters: listing.Filters = Depends(list_filters),
+    session: Session = Depends(get_session),
+) -> DocumentSummaryOut:
+    """
+    How many documents match the filters, by outcome, and their totals per
+    currency -- never added across currencies.
+    """
+    return DocumentSummaryOut.model_validate(listing.summary(session, filters))
+
+
+@router.get("/types", response_model=list[DocTypeOut], summary="The kinds of document read")
+def document_types(session: Session = Depends(get_session)) -> list[DocTypeOut]:
+    """The processors the caller's documents were read as, for filtering the list."""
+    return [DocTypeOut.model_validate(t) for t in listing.types(session)]
+
+
+@router.get(
+    "/export",
+    response_class=Response,
+    summary="Export the list as CSV",
+    responses={200: {"content": {"text/csv": {}}}},
+)
+def export_documents(
+    filters: listing.Filters = Depends(list_filters),
+    sort: Sort = Query(default="received"),
+    session: Session = Depends(get_session),
+) -> Response:
+    """
+    Every document matching the filters, as CSV, up to 50,000 rows. Text that
+    a spreadsheet would run as a formula is prefixed with an apostrophe.
+    """
+    filename = f"ledgerline-documents-{date.today().isoformat()}.csv"
+    return Response(
+        content=listing.export(session, filters, sort=sort),
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "private, no-store",
+        },
+    )
+
+
 @router.get(
     "/{document_id}/ocr",
     response_model=OcrResultOut,
@@ -192,6 +330,24 @@ def _disposition(filename: str | None) -> str:
         c if 32 <= ord(c) < 127 and c not in '"\\' else "_" for c in filename
     )
     return f"inline; filename=\"{plain}\"; filename*=UTF-8''{quote(filename, safe='')}"
+
+
+@router.get(
+    "/{document_id}/fields",
+    response_model=DocumentFieldsOut,
+    summary="Get a document's fields, for a person to read",
+)
+def get_fields(document_id: str, session: Session = Depends(get_session)) -> DocumentFieldsOut:
+    """
+    One document as the client portal shows it: every field in its processor's
+    order, labelled and typed, with the problem holding it in review, whether
+    it was worked out rather than read, and where on the original it was
+    printed. Shaped for a person; `/result` is the shape for a system.
+    """
+    document = repository.get_document(session, document_id)
+    if document is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No such document")
+    return DocumentFieldsOut.model_validate(document_fields(session, document))
 
 
 @router.get(

@@ -72,6 +72,15 @@ export function useDocumentQuery() {
 
 export type { SortKey };
 
+/**
+ * The query as sent: with the person's time zone when it filters by day, so
+ * "received on 26 October" means their 26 October, not UTC's.
+ */
+export function zoned<Q extends DocumentQuery>(query: Q): Q {
+  if (!query.from && !query.to) return query;
+  return { ...query, tz: Intl.DateTimeFormat().resolvedOptions().timeZone };
+}
+
 export type QueryChanges = Partial<Record<keyof DocumentQuery, string | undefined>>;
 
 /**
@@ -85,7 +94,7 @@ export interface PageTrail {
 export function useDocuments(query: DocumentQuery) {
   return useQuery({
     queryKey: ["documents", query],
-    queryFn: () => getJson<DocumentList>("/documents", { ...query, limit: PAGE_SIZE }),
+    queryFn: () => getJson<DocumentList>("/documents", { ...zoned(query), limit: PAGE_SIZE }),
     // Keep the last page on screen while the next loads: no flash of empty table.
     placeholderData: keepPreviousData,
   });
@@ -95,7 +104,7 @@ export function useDocuments(query: DocumentQuery) {
 export function useSummary({ cursor: _cursor, sort: _sort, ...filters }: DocumentQuery) {
   return useQuery({
     queryKey: ["documents", "summary", filters],
-    queryFn: () => getJson<DocumentSummary>("/documents/summary", filters),
+    queryFn: () => getJson<DocumentSummary>("/documents/summary", zoned(filters)),
     placeholderData: keepPreviousData,
   });
 }

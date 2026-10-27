@@ -24,7 +24,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # The text-layer reader, shared with the pipeline so the two cannot drift
 # apart. These three files and nothing else: the parser of untrusted uploads
 # gets no other application code, and none of its configuration.
-COPY ocr/__init__.py ocr/base.py ocr/pdftext.py ./ocr/
+COPY ocr/__init__.py ocr/base.py ocr/orientation.py ocr/pdftext.py ./ocr/
 COPY services/ocr_service/app.py .
 
 # Not root. Of every process in the system this is the one most likely to be

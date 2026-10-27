@@ -26,7 +26,7 @@ from importlib.metadata import version
 
 import pypdfium2 as pdfium
 
-from ocr.base import OcrEngine, OcrOutput, TextBlock
+from ocr.base import OcrEngine, OcrOutput, PageSize, TextBlock
 
 #: Below this many non-space characters a PDF is treated as having no usable
 #: text layer -- typically a scan, sometimes a page number and nothing else.
@@ -52,8 +52,10 @@ def read_text_layer(data: bytes) -> OcrOutput | None:
         if len(pdf) > MAX_PAGES:
             return None
         blocks: list[TextBlock] = []
+        sizes: list[PageSize] = []
         for number, page in enumerate(pdf, start=1):
-            _, height = page.get_size()
+            width, height = page.get_size()
+            sizes.append(PageSize(number, round(width * SCALE), round(height * SCALE)))
             textpage = page.get_textpage()
             for i in range(textpage.count_rects()):
                 left, bottom, right, top = textpage.get_rect(i)
@@ -83,6 +85,7 @@ def read_text_layer(data: bytes) -> OcrOutput | None:
     return OcrOutput(
         full_text="\n".join(b.text for b in blocks),
         blocks=blocks,
+        page_sizes=sizes,
         # Left as None rather than 1.0: the text is exact if the software that
         # wrote the PDF put it there, but a scanner's own OCR layer looks the
         # same from here and is not.

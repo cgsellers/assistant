@@ -46,18 +46,25 @@ function filtered(url: URL): DocumentRow[] {
 }
 
 function csv(rows: DocumentRow[]): string {
+  // As the API does (doctypes/listing.py): text from documents that a
+  // spreadsheet would run as a formula gets an apostrophe in front. Only the
+  // text columns: a negative amount stays a number.
+  const text = (value: string | null) => {
+    const plain = value ?? "";
+    return /^[=+\-@\t\r]/.test(plain) ? `'${plain}` : plain;
+  };
   const cell = (value: string | null) => `"${(value ?? "").replaceAll('"', '""')}"`;
   const header = "Received,Document date,Supplier,Type,Total,Currency,Status,File";
   const lines = rows.map((r) =>
     [
       r.received_at,
       r.document_date,
-      r.supplier,
-      r.type?.label ?? null,
+      text(r.supplier),
+      text(r.type?.label ?? null),
       r.total?.amount ?? null,
       r.total?.currency ?? null,
       r.outcome,
-      r.filename,
+      text(r.filename),
     ]
       .map(cell)
       .join(","),

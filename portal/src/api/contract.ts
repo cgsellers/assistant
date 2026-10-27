@@ -1,5 +1,8 @@
+import type { components } from "@/api/schema";
+
 /**
- * Endpoints the portal needs that the API does not have yet.
+ * Endpoints the portal needs that the API does not have yet, and the names
+ * the screens use for those it has.
  *
  * Written before the backend, on purpose: the mock handlers implement exactly
  * these shapes, the screens are built against them, and then the backend is
@@ -8,155 +11,63 @@
  * plus the type checker will then point at any disagreement.
  */
 
+// --- Built: the documents list ------------------------------------------------------
+// GET /documents, /summary, /types and /export are in the API. Their types come
+// from its schema (src/api/schema.d.ts); the names stay, so the screens and the
+// contracts still to be built below keep using them.
+
+type Schemas = components["schemas"];
+
 /** The five states a client sees. Same vocabulary as GET /documents/{id}/result. */
-export type Outcome = "processing" | "done" | "needs_review" | "unsupported" | "failed";
-
-export interface Money {
-  /** Exact decimal as a string, e.g. "104.88" -- never a float. */
-  amount: string;
-  /** ISO 4217, or null when the document did not say. */
-  currency: string | null;
-}
-
-/** One row of GET /documents. */
-export interface DocumentRow {
-  id: string;
-  filename: string | null;
-  /** When it reached Ledgerline: ISO 8601 with a time zone. */
-  received_at: string;
-  /** The document's own date, as printed: YYYY-MM-DD, or null. */
-  document_date: string | null;
-  /** Who issued it -- the supplier on an invoice, the shop on a receipt. */
-  supplier: string | null;
-  /** What kind of document it was read as, e.g. { name: "invoice", label: "Invoice" }. */
-  type: { name: string; label: string } | null;
-  total: Money | null;
-  outcome: Outcome;
-}
-
-/** GET /documents: newest first, a page at a time. */
-export interface DocumentList {
-  items: DocumentRow[];
-  /** Pass back as `cursor` for the next page; null on the last one. */
-  next_cursor: string | null;
-}
+export type Outcome = Schemas["DocumentRowOut"]["outcome"];
+export type Money = Schemas["MoneyOut"];
+export type DocumentRow = Schemas["DocumentRowOut"];
+export type DocumentList = Schemas["DocumentListOut"];
+export type DocumentSummary = Schemas["DocumentSummaryOut"];
+export type DocumentTypes = Schemas["DocTypeOut"][];
 
 export type SortKey = "received" | "document_date";
 
-/** Query parameters of GET /documents and GET /documents/export. */
+/** Query parameters of GET /documents, /summary and /export. */
 export interface DocumentQuery {
   outcome?: Outcome;
   /** A type's `name`. */
   type?: string;
   /** Matches supplier and filename, case-insensitively. */
   q?: string;
-  /** Received on or after / on or before, YYYY-MM-DD. */
+  /** Received on or after / on or before, YYYY-MM-DD, as days in `tz`. */
   from?: string;
   to?: string;
+  /** The person's IANA time zone, e.g. "Europe/Madrid"; the API assumes UTC without it. */
+  tz?: string;
   sort?: SortKey;
   cursor?: string;
   limit?: number;
 }
 
-/** GET /documents/summary: the headline numbers for a period. */
-export interface DocumentSummary {
-  documents: number;
-  by_outcome: Record<Outcome, number>;
-  /** Spend per currency. Never added across currencies. */
-  totals: Money[];
-}
-
-/** GET /documents/types: the kinds of document this client's documents were read as. */
-export type DocumentTypes = { name: string; label: string }[];
+// --- Built: one document's fields ---------------------------------------------------
+// GET /documents/{id}/fields is in the API. Its PATCH, below, is not yet.
 
 /** The value kinds a processor's fields can have (doctypes/definition.py FieldType). */
-export type FieldType = "string" | "integer" | "number" | "money" | "date" | "boolean";
-
+export type FieldType = Schemas["ScalarFieldOut"]["type"];
 /** A single value: money as "104.88", dates as YYYY-MM-DD -- the same wire form as /result. */
-export type FieldValue = string | number | boolean | null;
-
+export type FieldValue = Schemas["ScalarFieldOut"]["value"];
 /**
  * Where on the original a value was read: a page (from 1) and a box on it, as
- * fractions of the page's width and height from its top-left corner. Found by
- * matching the value against the OCR's words, so null when it was not printed
- * (a calculated total) or could not be matched.
+ * fractions of the page from its top-left, [left, top, right, bottom].
  */
-export interface Location {
-  page: number;
-  /** [left, top, right, bottom], each from 0 to 1. */
-  box: [number, number, number, number];
-}
-
+export type Location = Schemas["LocationOut"];
 /** A value someone changed by hand, and what had been read before. */
-export interface Correction {
-  /** Who: the signed-in user's name. */
-  by: string;
-  at: string;
-  /** The value as read. Null for a list, whose rows are replaced whole. */
-  was: FieldValue;
-}
-
-interface FieldBase {
-  /** The key in /result's `data`. */
-  name: string;
-  /** For people: "Invoice number" for invoice_number. */
-  label: string;
-  /** The processor's rules refuse the document without it. */
-  required: boolean;
-  /** Worked out by the processor's transform rather than read off the page. */
-  derived: boolean;
-  /** Why this field holds the document in review, or null. */
-  problem: string | null;
-  /** Set once someone has changed it. */
-  corrected: Correction | null;
-}
-
-export interface ScalarField extends FieldBase {
-  type: FieldType;
-  value: FieldValue;
-  location: Location | null;
-}
-
-export type ListRow = Record<string, FieldValue>;
-
+export type Correction = Schemas["CorrectionOut"];
+export type ScalarField = Schemas["ScalarFieldOut"];
+export type ListRow = Schemas["ListFieldOut"]["rows"][number];
 /** A repeated group, such as line items: shown as a table. */
-export interface ListField extends FieldBase {
-  type: "list";
-  columns: { name: string; label: string; type: FieldType }[];
-  rows: ListRow[];
-  /** Where each row was read, in the same order as `rows`. */
-  row_locations: (Location | null)[];
-}
-
+export type ListField = Schemas["ListFieldOut"];
 export type Field = ScalarField | ListField;
+/** GET /documents/{id}/fields: one document as the portal shows it. */
+export type DocumentFields = Schemas["DocumentFieldsOut"];
 
-/**
- * GET /documents/{id}/fields: one document as the portal shows it.
- *
- * Shaped for a screen, unlike /result, which is shaped for an ERP and stays
- * stable for it: labels, types and per-field problems are here and not there.
- * 5.4 adds PATCH on the same path for corrections.
- */
-export interface DocumentFields {
-  document: DocumentRow & { mime_type: string; size_bytes: number };
-  /** Which processor read it, or null if none has (yet). */
-  processor: { name: string; label: string; version: number } | null;
-  /** The document's currency, for every money field on it. */
-  currency: string | null;
-  /** In the processor's own order. Empty until the document has been read. */
-  fields: Field[];
-  /** Problems not about any one field, such as "Line items do not add up to the subtotal". */
-  problems: string[];
-  /** When the fields were read: ISO 8601, or null. */
-  read_at: string | null;
-  /**
-   * Goes up with every change. A PATCH names the revision it was made
-   * against, and is refused (409) if someone else saved in between.
-   */
-  revision: number;
-  /** What happened to the document, oldest first. */
-  history: { at: string; what: string; by: string | null }[];
-}
+// --- Still to build ------------------------------------------------------------------
 
 /**
  * PATCH /documents/{id}/fields: correct values, approve, or both.

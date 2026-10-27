@@ -29,7 +29,7 @@ from core.db import SessionLocal
 from core.models import Document, DocumentEvent, Job, OcrResult, utcnow
 from core.scoping import Scope, set_scope
 from core.status import DocStatus, JobKind, JobStatus
-from doctypes import registry
+from doctypes import listing, registry
 from doctypes.canonical import derived_columns, to_ledger
 from doctypes.definition import Definition
 from doctypes.schema import build_json_schema
@@ -169,6 +169,7 @@ def run_ocr_job(session: Session, job: Job, engine: OcrEngine) -> None:
             params=output.params,
             full_text=output.full_text,
             layout_blocks=output.as_layout_blocks(),
+            page_sizes=output.as_page_sizes() or None,
             mean_confidence=output.mean_confidence,
         )
     )
@@ -366,6 +367,11 @@ def run_extract_job(session: Session, job: Job, extractor: Extractor) -> None:
         cost_usd=result.cost_usd,
         latency_ms=result.latency_ms,
     )
+
+    # What the documents list shows, from what was read: set now, whatever the
+    # rules decide next, because the list matters most for the documents
+    # they send to review.
+    listing.summarise(document, definition, processed.data)
 
     _record_transition(
         session, document, DocStatus.EXTRACTED,

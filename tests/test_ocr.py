@@ -10,7 +10,13 @@ import pytest
 from ocr import get_engine
 from ocr.base import OcrEngine, OcrError, OcrOutput, TextBlock, UnsupportedMediaType
 from ocr.ppocr import PpOcrEngine, _to_output
-from ocr.tesseract import TesseractEngine, _parse_tsv
+from ocr.tesseract import TesseractEngine
+from ocr.tesseract import _parse_tsv as _parse_both
+
+
+def _parse_tsv(tsv: str):
+    """The blocks alone, as most of these tests want."""
+    return _parse_both(tsv)[0]
 
 HAS_TESSERACT = shutil.which("tesseract") is not None
 
@@ -130,6 +136,11 @@ class TestParseTsv:
 
     def test_empty_input_yields_no_blocks(self):
         assert _parse_tsv("") == []
+
+    def test_reads_each_pages_size_from_its_page_row(self):
+        """Level 1 is the page: its size is what places a box on it (doctypes/locate.py)."""
+        _, sizes = _parse_both(SAMPLE_TSV)
+        assert [(p.page, p.width, p.height) for p in sizes] == [(1, 420, 360)]
 
 
 class TestTesseractEngine:

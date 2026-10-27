@@ -196,6 +196,18 @@ class Document(Base):
         UTCDateTime, default=utcnow
     )
 
+    # What the documents list shows, set when the document is read (and again
+    # when it is corrected) by doctypes.canonical.to_summary. A read model:
+    # the ledger is the accounting record and exists only for documents that
+    # passed their rules, but the list must show what was read from every
+    # document -- the ones in review most of all -- and filter, search and
+    # sort on it in SQL. Null until read, and wherever nothing was.
+    doc_type: Mapped[str | None] = mapped_column(String(64))
+    supplier: Mapped[str | None] = mapped_column(String(200))
+    document_date: Mapped[date | None] = mapped_column(Date)
+    total_amount: Mapped[Decimal | None] = mapped_column(Money(14, 4))
+    total_currency: Mapped[str | None] = mapped_column(String(3))
+
     ocr_result: Mapped[OcrResult | None] = relationship(
         back_populates="document", uselist=False
     )
@@ -203,7 +215,11 @@ class Document(Base):
         back_populates="document", order_by="DocumentEvent.created_at"
     )
 
-    __table_args__ = (UniqueConstraint("organisation_id", "sha256"),)
+    __table_args__ = (
+        UniqueConstraint("organisation_id", "sha256"),
+        # The list's order, newest first, within one organisation.
+        Index("ix_documents_listing", "organisation_id", "uploaded_at", "id"),
+    )
 
 
 class OcrResult(Base):
@@ -230,6 +246,10 @@ class OcrResult(Base):
     # [{"text": ..., "bbox": [x0, y0, x1, y1], "confidence": 0.98, "page": 1}, ...]
     # Bounding boxes are what let the analyst cite a spot on the page.
     layout_blocks: Mapped[list] = mapped_column(JsonType)
+    # [{"page": 1, "width": 2480, "height": 3508}, ...] in the bboxes' units.
+    # What places a bbox on the page a browser shows; null for results read
+    # before engines reported it, which then simply have no locations.
+    page_sizes: Mapped[list | None] = mapped_column(JsonType)
     mean_confidence: Mapped[float | None] = mapped_column(Float)  # null for VLMs
     created_at: Mapped[datetime] = mapped_column(
         UTCDateTime, default=utcnow

@@ -130,7 +130,7 @@ services:
     command:
       - sh
       - -c
-      - alembic upgrade head && python -m core.dbroles && python -m doctypes.seed
+      - alembic upgrade head && python -m core.dbroles && python -m doctypes.seed && python -m doctypes.listing backfill
     restart: "no"
     networks: [backend]
     depends_on:

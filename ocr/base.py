@@ -42,16 +42,35 @@ class TextBlock:
 
 
 @dataclass(frozen=True)
+class PageSize:
+    """
+    A page's size in the same units as its blocks' bboxes: pixels of the image
+    or rendered page, or scaled points for a PDF's text layer. What turns a
+    bbox into a place on the page a browser shows (doctypes/locate.py).
+    """
+
+    page: int
+    width: int
+    height: int
+
+
+@dataclass(frozen=True)
 class OcrOutput:
     """What every engine returns, and what gets written to `ocr_results`."""
 
     full_text: str
     blocks: list[TextBlock] = field(default_factory=list)
+    #: One per page read, when the engine knows them.
+    page_sizes: list[PageSize] = field(default_factory=list)
     mean_confidence: float | None = None
     engine: str = "unknown"
     engine_version: str | None = None
     # Whatever was needed to reproduce this run: language, dpi, model size.
     params: dict | None = None
+
+    def as_page_sizes(self) -> list[dict]:
+        """JSON form for the `ocr_results.page_sizes` column."""
+        return [{"page": p.page, "width": p.width, "height": p.height} for p in self.page_sizes]
 
     def as_layout_blocks(self) -> list[dict]:
         """JSON form for the `ocr_results.layout_blocks` column."""

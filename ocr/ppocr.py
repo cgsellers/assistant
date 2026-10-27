@@ -15,7 +15,7 @@ from __future__ import annotations
 import httpx
 
 from core.config import get_settings
-from ocr.base import OcrError, OcrOutput, TextBlock, UnsupportedMediaType
+from ocr.base import OcrError, OcrOutput, PageSize, TextBlock, UnsupportedMediaType
 
 # Generous: a 20-page PDF at 200 DPI took ~8s per page in testing, and the
 # worker is not latency-sensitive.
@@ -83,6 +83,11 @@ def _to_output(payload: dict) -> OcrOutput:
     return OcrOutput(
         full_text=payload.get("full_text", ""),
         blocks=blocks,
+        # Absent from containers built before page sizes were reported.
+        page_sizes=[
+            PageSize(int(p["page"]), int(p["width"]), int(p["height"]))
+            for p in payload.get("page_sizes") or []
+        ],
         mean_confidence=payload.get("mean_confidence"),
         engine=payload.get("engine", "ppocr-onnx"),
         engine_version=payload.get("engine_version"),

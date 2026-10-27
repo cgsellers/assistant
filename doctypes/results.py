@@ -85,7 +85,7 @@ def document_result(session: Session, document: Document) -> dict[str, Any]:
             "version": extraction.schema_version,
             "profile": extraction.profile,
         },
-        data=_normalised(session, extraction),
+        data=normalised_data(session, extraction),
         read=extraction.raw_json,
         derived=extraction.derived_fields or [],
         problems=extraction.validation_errors or [],
@@ -94,7 +94,7 @@ def document_result(session: Session, document: Document) -> dict[str, Any]:
     return result
 
 
-def _normalised(session: Session, extraction) -> dict | None:
+def normalised_data(session: Session, extraction) -> dict | None:
     """
     The values the ledger was built from, in exact wire form.
 

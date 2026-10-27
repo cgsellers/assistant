@@ -19,7 +19,8 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from ocr.base import OcrError, OcrOutput, TextBlock, UnsupportedMediaType
+from ocr.base import OcrError, OcrOutput, PageSize, TextBlock, UnsupportedMediaType
+from ocr.orientation import upright
 
 # Tesseract reads images. PDFs need rasterising first, which is a job for the
 # PaddleOCR container -- this engine declares the gap rather than guessing.
@@ -41,12 +42,13 @@ class TesseractEngine:
                 f"tesseract cannot read {mime_type}; it handles {sorted(_READABLE)}"
             )
 
+        data, _ = upright(data, mime_type)
         with tempfile.TemporaryDirectory() as tmp:
             source = Path(tmp) / "input"
             source.write_bytes(data)
             tsv = self._run(source)
 
-        blocks = _parse_tsv(tsv)
+        blocks, sizes = _parse_tsv(tsv)
         confidences = [b.confidence for b in blocks if b.confidence is not None]
 
         return OcrOutput(
@@ -54,6 +56,7 @@ class TesseractEngine:
             # tesseract call, so text and blocks can never disagree.
             full_text=" ".join(b.text for b in blocks),
             blocks=blocks,
+            page_sizes=sizes,
             mean_confidence=sum(confidences) / len(confidences) if confidences else None,
             engine=self.name,
             engine_version=self.version(),
@@ -94,19 +97,29 @@ class TesseractEngine:
         return match.group(1) if match else None
 
 
-def _parse_tsv(tsv: str) -> list[TextBlock]:
+def _parse_tsv(tsv: str) -> tuple[list[TextBlock], list[PageSize]]:
     """
-    Turn tesseract's TSV into blocks.
+    Turn tesseract's TSV into blocks, and each page's size.
 
-    The TSV has a row per layout element at every level; level 5 is a word.
-    Rows above that are containers with conf = -1 and no text, so they are
-    dropped. Confidence is reported 0-100 and normalised to 0.0-1.0 here so
-    every engine reports on the same scale.
+    The TSV has a row per layout element at every level: level 1 is a page,
+    with its size; level 5 is a word. The containers between have conf = -1
+    and no text, so they are dropped. Confidence is reported 0-100 and
+    normalised to 0.0-1.0 here so every engine reports on the same scale.
     """
     blocks: list[TextBlock] = []
+    sizes: list[PageSize] = []
 
     for row in csv.DictReader(io.StringIO(tsv), delimiter="\t", quoting=csv.QUOTE_NONE):
-        if row.get("level") != "5":
+        level = row.get("level")
+        if level == "1":
+            try:
+                sizes.append(
+                    PageSize(int(row.get("page_num") or 1), int(row["width"]), int(row["height"]))
+                )
+            except (KeyError, ValueError):
+                pass
+            continue
+        if level != "5":
             continue
         text = (row.get("text") or "").strip()
         if not text:
@@ -128,4 +141,4 @@ def _parse_tsv(tsv: str) -> list[TextBlock]:
             )
         )
 
-    return blocks
+    return blocks, sizes

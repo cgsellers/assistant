@@ -8,3 +8,7 @@ fastapi[standard]==0.141.1
 # native aarch64 build, unlike the Paddle framework -- see docs/DESIGN.md 5.12.
 # Kept at the pipeline's version (uv.lock): ocr/pdftext.py runs here too.
 pypdfium2==5.14.0
+# Turns photos upright before OCR (ocr/orientation.py, shared with the
+# pipeline), and renders PDF pages. Already pulled in by the packages above;
+# pinned here at the pipeline's version because this image now uses it directly.
+pillow==12.3.0

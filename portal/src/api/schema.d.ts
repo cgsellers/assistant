@@ -87,7 +87,16 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * List documents
+         * @description The caller's documents, newest first, a page at a time: what each one is,
+         *     who issued it, its own date and total, and its outcome. Documents in review
+         *     show what was read from them.
+         *
+         *     Paged by cursor, which stays correct while new documents arrive. Pass
+         *     `next_cursor` back as `cursor`, with the same filters and sort.
+         */
+        get: operations["list_documents_documents_get"];
         put?: never;
         /**
          * Upload a document
@@ -124,6 +133,68 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/documents/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export the list as CSV
+         * @description Every document matching the filters, as CSV, up to 50,000 rows. Text that
+         *     a spreadsheet would run as a formula is prefixed with an apostrophe.
+         */
+        get: operations["export_documents_documents_export_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/documents/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Count and total the documents
+         * @description How many documents match the filters, by outcome, and their totals per
+         *     currency -- never added across currencies.
+         */
+        get: operations["summarise_documents_documents_summary_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/documents/types": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The kinds of document read
+         * @description The processors the caller's documents were read as, for filtering the list.
+         */
+        get: operations["document_types_documents_types_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/documents/{document_id}": {
         parameters: {
             query?: never;
@@ -136,6 +207,29 @@ export interface paths {
          * @description Current status plus the full audit trail of how it got there.
          */
         get: operations["get_document_documents__document_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/documents/{document_id}/fields": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a document's fields, for a person to read
+         * @description One document as the client portal shows it: every field in its processor's
+         *     order, labelled and typed, with the problem holding it in review, whether
+         *     it was worked out rather than read, and where on the original it was
+         *     printed. Shaped for a person; `/result` is the shape for a system.
+         */
+        get: operations["get_fields_documents__document_id__fields_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -506,6 +600,43 @@ export interface components {
              */
             file: string;
         };
+        /** ByOutcomeOut */
+        ByOutcomeOut: {
+            /** Done */
+            done: number;
+            /** Failed */
+            failed: number;
+            /** Needs Review */
+            needs_review: number;
+            /** Processing */
+            processing: number;
+            /** Unsupported */
+            unsupported: number;
+        };
+        /** ColumnOut */
+        ColumnOut: {
+            /** Label */
+            label: string;
+            /** Name */
+            name: string;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "string" | "integer" | "number" | "money" | "date" | "boolean";
+        };
+        /** CorrectionOut */
+        CorrectionOut: {
+            /**
+             * At
+             * Format: date-time
+             */
+            at: string;
+            /** By */
+            by: string;
+            /** Was */
+            was: string | number | boolean | null;
+        };
         /**
          * DefinitionIn
          * @description Exactly one of `definition` (JSON) or `yaml` (the seed format).
@@ -520,6 +651,13 @@ export interface components {
              * @description The processor in seed YAML
              */
             yaml?: string | null;
+        };
+        /** DocTypeOut */
+        DocTypeOut: {
+            /** Label */
+            label: string;
+            /** Name */
+            name: string;
         };
         /**
          * DocumentDetail
@@ -570,6 +708,33 @@ export interface components {
             /** To Status */
             to_status: string;
         };
+        /**
+         * DocumentFieldsOut
+         * @description GET /documents/{id}/fields: one document, shaped for the portal's page.
+         */
+        DocumentFieldsOut: {
+            /** Currency */
+            currency: string | null;
+            document: components["schemas"]["FieldsDocumentOut"];
+            /** Fields */
+            fields: (components["schemas"]["ScalarFieldOut"] | components["schemas"]["ListFieldOut"])[];
+            /** History */
+            history: components["schemas"]["HistoryEntryOut"][];
+            /** Problems */
+            problems: string[];
+            processor: components["schemas"]["ProcessorRefOut"] | null;
+            /** Read At */
+            read_at: string | null;
+            /** Revision */
+            revision: number;
+        };
+        /** DocumentListOut */
+        DocumentListOut: {
+            /** Items */
+            items: components["schemas"]["DocumentRowOut"][];
+            /** Next Cursor */
+            next_cursor: string | null;
+        };
         /** DocumentOut */
         DocumentOut: {
             /**
@@ -594,6 +759,40 @@ export interface components {
              * Format: date-time
              */
             uploaded_at: string;
+        };
+        /**
+         * DocumentRowOut
+         * @description One row of GET /documents.
+         */
+        DocumentRowOut: {
+            /** Document Date */
+            document_date: string | null;
+            /** Filename */
+            filename: string | null;
+            /** Id */
+            id: string;
+            /**
+             * Outcome
+             * @enum {string}
+             */
+            outcome: "processing" | "done" | "needs_review" | "unsupported" | "failed";
+            /**
+             * Received At
+             * Format: date-time
+             */
+            received_at: string;
+            /** Supplier */
+            supplier: string | null;
+            total: components["schemas"]["MoneyOut"] | null;
+            type: components["schemas"]["DocTypeOut"] | null;
+        };
+        /** DocumentSummaryOut */
+        DocumentSummaryOut: {
+            by_outcome: components["schemas"]["ByOutcomeOut"];
+            /** Documents */
+            documents: number;
+            /** Totals */
+            totals: components["schemas"]["MoneyOut"][];
         };
         /** DraftIn */
         DraftIn: {
@@ -644,10 +843,49 @@ export interface components {
             /** Yaml */
             yaml: string | null;
         };
+        /** FieldsDocumentOut */
+        FieldsDocumentOut: {
+            /** Document Date */
+            document_date: string | null;
+            /** Filename */
+            filename: string | null;
+            /** Id */
+            id: string;
+            /** Mime Type */
+            mime_type: string;
+            /**
+             * Outcome
+             * @enum {string}
+             */
+            outcome: "processing" | "done" | "needs_review" | "unsupported" | "failed";
+            /**
+             * Received At
+             * Format: date-time
+             */
+            received_at: string;
+            /** Size Bytes */
+            size_bytes: number;
+            /** Supplier */
+            supplier: string | null;
+            total: components["schemas"]["MoneyOut"] | null;
+            type: components["schemas"]["DocTypeOut"] | null;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /** HistoryEntryOut */
+        HistoryEntryOut: {
+            /**
+             * At
+             * Format: date-time
+             */
+            at: string;
+            /** By */
+            by: string | null;
+            /** What */
+            what: string;
         };
         /** LedgerRowOut */
         LedgerRowOut: {
@@ -669,6 +907,48 @@ export interface components {
             occurred_on: string | null;
             /** Tax Amount */
             tax_amount: string | null;
+        };
+        /** ListFieldOut */
+        ListFieldOut: {
+            /** Columns */
+            columns: components["schemas"]["ColumnOut"][];
+            corrected: components["schemas"]["CorrectionOut"] | null;
+            /** Derived */
+            derived: boolean;
+            /** Label */
+            label: string;
+            /** Name */
+            name: string;
+            /** Problem */
+            problem: string | null;
+            /** Required */
+            required: boolean;
+            /** Row Locations */
+            row_locations: (components["schemas"]["LocationOut"] | null)[];
+            /** Rows */
+            rows: {
+                [key: string]: string | number | boolean | null;
+            }[];
+            /**
+             * Type
+             * @constant
+             */
+            type: "list";
+        };
+        /**
+         * LocationOut
+         * @description Where on the original a value was printed: a page, and a box on it as fractions.
+         */
+        LocationOut: {
+            /** Box */
+            box: [
+                number,
+                number,
+                number,
+                number
+            ];
+            /** Page */
+            page: number;
         };
         /** MeOut */
         MeOut: {
@@ -694,6 +974,13 @@ export interface components {
             organisation_name?: string | null;
             /** Role */
             role: string;
+        };
+        /** MoneyOut */
+        MoneyOut: {
+            /** Amount */
+            amount: string;
+            /** Currency */
+            currency: string | null;
         };
         /**
          * OcrResultOut
@@ -737,6 +1024,15 @@ export interface components {
             /** Version */
             version: number;
         };
+        /** ProcessorRefOut */
+        ProcessorRefOut: {
+            /** Label */
+            label: string;
+            /** Name */
+            name: string;
+            /** Version */
+            version: number;
+        };
         /**
          * ResultOut
          * @description A document's result, for a client system to import. See doctypes/results.py.
@@ -770,6 +1066,28 @@ export interface components {
             /** Status */
             status: string;
             transaction: components["schemas"]["LedgerRowOut"] | null;
+        };
+        /** ScalarFieldOut */
+        ScalarFieldOut: {
+            corrected: components["schemas"]["CorrectionOut"] | null;
+            /** Derived */
+            derived: boolean;
+            /** Label */
+            label: string;
+            location: components["schemas"]["LocationOut"] | null;
+            /** Name */
+            name: string;
+            /** Problem */
+            problem: string | null;
+            /** Required */
+            required: boolean;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "string" | "integer" | "number" | "money" | "date" | "boolean";
+            /** Value */
+            value: string | number | boolean | null;
         };
         /** SignInIn */
         SignInIn: {
@@ -1034,6 +1352,53 @@ export interface operations {
             };
         };
     };
+    list_documents_documents_get: {
+        parameters: {
+            query?: {
+                /** @description Newest first, by when it arrived or by its own date */
+                sort?: "received" | "document_date";
+                /** @description `next_cursor` from the page before */
+                cursor?: string | null;
+                limit?: number;
+                /** @description Only documents with this outcome */
+                outcome?: ("processing" | "done" | "needs_review" | "unsupported" | "failed") | null;
+                /** @description Only documents read as this processor (its name) */
+                type?: string | null;
+                /** @description Matches the supplier or the file name */
+                q?: string | null;
+                /** @description Received on or after this day (in `tz`) */
+                from?: string | null;
+                /** @description Received on or before this day (in `tz`) */
+                to?: string | null;
+                /** @description The IANA time zone `from` and `to` are days in, e.g. Europe/Madrid */
+                tz?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentListOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     upload_documents_post: {
         parameters: {
             query?: never;
@@ -1100,6 +1465,111 @@ export interface operations {
             };
         };
     };
+    export_documents_documents_export_get: {
+        parameters: {
+            query?: {
+                sort?: "received" | "document_date";
+                /** @description Only documents with this outcome */
+                outcome?: ("processing" | "done" | "needs_review" | "unsupported" | "failed") | null;
+                /** @description Only documents read as this processor (its name) */
+                type?: string | null;
+                /** @description Matches the supplier or the file name */
+                q?: string | null;
+                /** @description Received on or after this day (in `tz`) */
+                from?: string | null;
+                /** @description Received on or before this day (in `tz`) */
+                to?: string | null;
+                /** @description The IANA time zone `from` and `to` are days in, e.g. Europe/Madrid */
+                tz?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    summarise_documents_documents_summary_get: {
+        parameters: {
+            query?: {
+                /** @description Only documents with this outcome */
+                outcome?: ("processing" | "done" | "needs_review" | "unsupported" | "failed") | null;
+                /** @description Only documents read as this processor (its name) */
+                type?: string | null;
+                /** @description Matches the supplier or the file name */
+                q?: string | null;
+                /** @description Received on or after this day (in `tz`) */
+                from?: string | null;
+                /** @description Received on or before this day (in `tz`) */
+                to?: string | null;
+                /** @description The IANA time zone `from` and `to` are days in, e.g. Europe/Madrid */
+                tz?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentSummaryOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    document_types_documents_types_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocTypeOut"][];
+                };
+            };
+        };
+    };
     get_document_documents__document_id__get: {
         parameters: {
             query?: never;
@@ -1118,6 +1588,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DocumentDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_fields_documents__document_id__fields_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentFieldsOut"];
                 };
             };
             /** @description Validation Error */

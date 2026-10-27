@@ -210,9 +210,13 @@ class TestOpenApi:
         assert set(paths) == {
             "/documents",
             "/documents/base64",
+            "/documents/summary",
+            "/documents/types",
+            "/documents/export",
             "/documents/{document_id}",
             "/documents/{document_id}/ocr",
             "/documents/{document_id}/result",
+            "/documents/{document_id}/fields",
             "/documents/{document_id}/file",
             "/costs",
             "/health",

@@ -30,6 +30,7 @@ import pypdfium2 as pdfium
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile, status
 from rapidocr import RapidOCR
 
+from ocr.orientation import upright
 from ocr.pdftext import read_text_layer
 
 log = logging.getLogger("ocr_service")
@@ -112,8 +113,8 @@ def _read_one(image_bytes: bytes, page: int) -> list[dict]:
     return blocks
 
 
-def _pdf_to_pages(data: bytes, dpi: int) -> Iterator[bytes]:
-    """Rasterise each PDF page to PNG bytes."""
+def _pdf_to_pages(data: bytes, dpi: int) -> Iterator[tuple[bytes, int, int]]:
+    """Rasterise each PDF page to PNG bytes, with the rendered size its boxes are in."""
     document = pdfium.PdfDocument(data)
     try:
         if len(document) > MAX_PAGES:
@@ -124,9 +125,10 @@ def _pdf_to_pages(data: bytes, dpi: int) -> Iterator[bytes]:
         for page in document:
             # PDF user units are 1/72 inch, so scale is dpi/72.
             bitmap = page.render(scale=dpi / 72)
+            image = bitmap.to_pil()
             buffer = io.BytesIO()
-            bitmap.to_pil().save(buffer, format="PNG")
-            yield buffer.getvalue()
+            image.save(buffer, format="PNG")
+            yield buffer.getvalue(), image.width, image.height
     finally:
         document.close()
 
@@ -155,6 +157,7 @@ def _text_layer(data: bytes) -> dict | None:
         ],
         "mean_confidence": None,
         "pages": max((b.page for b in output.blocks), default=0),
+        "page_sizes": output.as_page_sizes(),
     }
 
 
@@ -196,15 +199,17 @@ async def ocr(
         layer = _text_layer(data)
         if layer is not None:
             return {**layer, "elapsed_seconds": round(time.perf_counter() - started, 3)}
-        blocks = [
-            block
-            for page_number, png in enumerate(_pdf_to_pages(data, dpi), start=1)
-            for block in _read_one(png, page_number)
-        ]
+        blocks, page_sizes = [], []
+        for page_number, (png, width, height) in enumerate(_pdf_to_pages(data, dpi), start=1):
+            blocks += _read_one(png, page_number)
+            page_sizes.append({"page": page_number, "width": width, "height": height})
         pages = max((b["page"] for b in blocks), default=0)
         params = {"dpi": dpi, "source": "pdf"}
     elif content_type in IMAGE_TYPES or not content_type:
+        # The right way up first, so the boxes are in the frame a browser shows.
+        data, size = upright(data, content_type)
         blocks = _read_one(data, 1)
+        page_sizes = [{"page": 1, "width": size[0], "height": size[1]}] if size else []
         pages = 1
         params = {"source": "image"}
     else:
@@ -225,5 +230,6 @@ async def ocr(
         "blocks": blocks,
         "mean_confidence": sum(confidences) / len(confidences) if confidences else None,
         "pages": pages,
+        "page_sizes": page_sizes,
         "elapsed_seconds": round(time.perf_counter() - started, 3),
     }

@@ -135,6 +135,110 @@
         "title": "Body_upload_documents_post",
         "type": "object"
       },
+      "ByOutcomeOut": {
+        "properties": {
+          "done": {
+            "title": "Done",
+            "type": "integer"
+          },
+          "failed": {
+            "title": "Failed",
+            "type": "integer"
+          },
+          "needs_review": {
+            "title": "Needs Review",
+            "type": "integer"
+          },
+          "processing": {
+            "title": "Processing",
+            "type": "integer"
+          },
+          "unsupported": {
+            "title": "Unsupported",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "processing",
+          "done",
+          "needs_review",
+          "unsupported",
+          "failed"
+        ],
+        "title": "ByOutcomeOut",
+        "type": "object"
+      },
+      "ColumnOut": {
+        "properties": {
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "string",
+              "integer",
+              "number",
+              "money",
+              "date",
+              "boolean"
+            ],
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "label",
+          "type"
+        ],
+        "title": "ColumnOut",
+        "type": "object"
+      },
+      "CorrectionOut": {
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "by": {
+            "title": "By",
+            "type": "string"
+          },
+          "was": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Was"
+          }
+        },
+        "required": [
+          "by",
+          "at",
+          "was"
+        ],
+        "title": "CorrectionOut",
+        "type": "object"
+      },
       "DefinitionIn": {
         "description": "Exactly one of `definition` (JSON) or `yaml` (the seed format).",
         "properties": {
@@ -164,6 +268,24 @@
           }
         },
         "title": "DefinitionIn",
+        "type": "object"
+      },
+      "DocTypeOut": {
+        "properties": {
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "label"
+        ],
+        "title": "DocTypeOut",
         "type": "object"
       },
       "DocumentDetail": {
@@ -275,6 +397,119 @@
         "title": "DocumentEventOut",
         "type": "object"
       },
+      "DocumentFieldsOut": {
+        "description": "GET /documents/{id}/fields: one document, shaped for the portal's page.",
+        "properties": {
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
+          },
+          "document": {
+            "$ref": "#/components/schemas/FieldsDocumentOut"
+          },
+          "fields": {
+            "items": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/ScalarFieldOut"
+                },
+                {
+                  "$ref": "#/components/schemas/ListFieldOut"
+                }
+              ]
+            },
+            "title": "Fields",
+            "type": "array"
+          },
+          "history": {
+            "items": {
+              "$ref": "#/components/schemas/HistoryEntryOut"
+            },
+            "title": "History",
+            "type": "array"
+          },
+          "problems": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Problems",
+            "type": "array"
+          },
+          "processor": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProcessorRefOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "read_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Read At"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "document",
+          "processor",
+          "currency",
+          "fields",
+          "problems",
+          "read_at",
+          "revision",
+          "history"
+        ],
+        "title": "DocumentFieldsOut",
+        "type": "object"
+      },
+      "DocumentListOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/DocumentRowOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "DocumentListOut",
+        "type": "object"
+      },
       "DocumentOut": {
         "properties": {
           "duplicate": {
@@ -329,6 +564,122 @@
           "uploaded_at"
         ],
         "title": "DocumentOut",
+        "type": "object"
+      },
+      "DocumentRowOut": {
+        "description": "One row of GET /documents.",
+        "properties": {
+          "document_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Document Date"
+          },
+          "filename": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filename"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "outcome": {
+            "enum": [
+              "processing",
+              "done",
+              "needs_review",
+              "unsupported",
+              "failed"
+            ],
+            "title": "Outcome",
+            "type": "string"
+          },
+          "received_at": {
+            "format": "date-time",
+            "title": "Received At",
+            "type": "string"
+          },
+          "supplier": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supplier"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MoneyOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "type": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DocTypeOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "filename",
+          "received_at",
+          "document_date",
+          "supplier",
+          "type",
+          "total",
+          "outcome"
+        ],
+        "title": "DocumentRowOut",
+        "type": "object"
+      },
+      "DocumentSummaryOut": {
+        "properties": {
+          "by_outcome": {
+            "$ref": "#/components/schemas/ByOutcomeOut"
+          },
+          "documents": {
+            "title": "Documents",
+            "type": "integer"
+          },
+          "totals": {
+            "items": {
+              "$ref": "#/components/schemas/MoneyOut"
+            },
+            "title": "Totals",
+            "type": "array"
+          }
+        },
+        "required": [
+          "documents",
+          "by_outcome",
+          "totals"
+        ],
+        "title": "DocumentSummaryOut",
         "type": "object"
       },
       "DraftIn": {
@@ -460,6 +811,106 @@
         "title": "DraftedOut",
         "type": "object"
       },
+      "FieldsDocumentOut": {
+        "properties": {
+          "document_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Document Date"
+          },
+          "filename": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filename"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "mime_type": {
+            "title": "Mime Type",
+            "type": "string"
+          },
+          "outcome": {
+            "enum": [
+              "processing",
+              "done",
+              "needs_review",
+              "unsupported",
+              "failed"
+            ],
+            "title": "Outcome",
+            "type": "string"
+          },
+          "received_at": {
+            "format": "date-time",
+            "title": "Received At",
+            "type": "string"
+          },
+          "size_bytes": {
+            "title": "Size Bytes",
+            "type": "integer"
+          },
+          "supplier": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supplier"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MoneyOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "type": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DocTypeOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "filename",
+          "received_at",
+          "document_date",
+          "supplier",
+          "type",
+          "total",
+          "outcome",
+          "mime_type",
+          "size_bytes"
+        ],
+        "title": "FieldsDocumentOut",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -471,6 +922,37 @@
           }
         },
         "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "HistoryEntryOut": {
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "By"
+          },
+          "what": {
+            "title": "What",
+            "type": "string"
+          }
+        },
+        "required": [
+          "at",
+          "what",
+          "by"
+        ],
+        "title": "HistoryEntryOut",
         "type": "object"
       },
       "LedgerRowOut": {
@@ -564,6 +1046,148 @@
         "title": "LedgerRowOut",
         "type": "object"
       },
+      "ListFieldOut": {
+        "properties": {
+          "columns": {
+            "items": {
+              "$ref": "#/components/schemas/ColumnOut"
+            },
+            "title": "Columns",
+            "type": "array"
+          },
+          "corrected": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CorrectionOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "derived": {
+            "title": "Derived",
+            "type": "boolean"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "problem": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Problem"
+          },
+          "required": {
+            "title": "Required",
+            "type": "boolean"
+          },
+          "row_locations": {
+            "items": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/LocationOut"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Row Locations",
+            "type": "array"
+          },
+          "rows": {
+            "items": {
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "type": "object"
+            },
+            "title": "Rows",
+            "type": "array"
+          },
+          "type": {
+            "const": "list",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "label",
+          "required",
+          "derived",
+          "problem",
+          "corrected",
+          "type",
+          "columns",
+          "rows",
+          "row_locations"
+        ],
+        "title": "ListFieldOut",
+        "type": "object"
+      },
+      "LocationOut": {
+        "description": "Where on the original a value was printed: a page, and a box on it as fractions.",
+        "properties": {
+          "box": {
+            "maxItems": 4,
+            "minItems": 4,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Box",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "page",
+          "box"
+        ],
+        "title": "LocationOut",
+        "type": "object"
+      },
       "MeOut": {
         "properties": {
           "csrf_header": {
@@ -628,6 +1252,31 @@
           "role"
         ],
         "title": "MeOut",
+        "type": "object"
+      },
+      "MoneyOut": {
+        "properties": {
+          "amount": {
+            "title": "Amount",
+            "type": "string"
+          },
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
+          }
+        },
+        "required": [
+          "amount",
+          "currency"
+        ],
+        "title": "MoneyOut",
         "type": "object"
       },
       "OcrResultOut": {
@@ -739,6 +1388,29 @@
         "title": "ProcessorRef",
         "type": "object"
       },
+      "ProcessorRefOut": {
+        "properties": {
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "label",
+          "version"
+        ],
+        "title": "ProcessorRefOut",
+        "type": "object"
+      },
       "ResultOut": {
         "description": "A document's result, for a client system to import. See doctypes/results.py.\n\nPoll until `outcome` is not \"processing\". \"done\" means every rule passed;\n\"needs_review\" still carries `data`, with `problems` saying what failed.",
         "properties": {
@@ -844,6 +1516,102 @@
           "extracted_at"
         ],
         "title": "ResultOut",
+        "type": "object"
+      },
+      "ScalarFieldOut": {
+        "properties": {
+          "corrected": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CorrectionOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "derived": {
+            "title": "Derived",
+            "type": "boolean"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "location": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LocationOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "problem": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Problem"
+          },
+          "required": {
+            "title": "Required",
+            "type": "boolean"
+          },
+          "type": {
+            "enum": [
+              "string",
+              "integer",
+              "number",
+              "money",
+              "date",
+              "boolean"
+            ],
+            "title": "Type",
+            "type": "string"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "name",
+          "label",
+          "required",
+          "derived",
+          "problem",
+          "corrected",
+          "type",
+          "value",
+          "location"
+        ],
+        "title": "ScalarFieldOut",
         "type": "object"
       },
       "SignInIn": {
@@ -1482,6 +2250,198 @@
       }
     },
     "/documents": {
+      "get": {
+        "description": "The caller's documents, newest first, a page at a time: what each one is,\nwho issued it, its own date and total, and its outcome. Documents in review\nshow what was read from them.\n\nPaged by cursor, which stays correct while new documents arrive. Pass\n`next_cursor` back as `cursor`, with the same filters and sort.",
+        "operationId": "list_documents_documents_get",
+        "parameters": [
+          {
+            "description": "Newest first, by when it arrived or by its own date",
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "received",
+              "description": "Newest first, by when it arrived or by its own date",
+              "enum": [
+                "received",
+                "document_date"
+              ],
+              "title": "Sort",
+              "type": "string"
+            }
+          },
+          {
+            "description": "`next_cursor` from the page before",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 500,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "`next_cursor` from the page before",
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Only documents with this outcome",
+            "in": "query",
+            "name": "outcome",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "processing",
+                    "done",
+                    "needs_review",
+                    "unsupported",
+                    "failed"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only documents with this outcome",
+              "title": "Outcome"
+            }
+          },
+          {
+            "description": "Only documents read as this processor (its name)",
+            "in": "query",
+            "name": "type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only documents read as this processor (its name)",
+              "title": "Type"
+            }
+          },
+          {
+            "description": "Matches the supplier or the file name",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Matches the supplier or the file name",
+              "title": "Q"
+            }
+          },
+          {
+            "description": "Received on or after this day (in `tz`)",
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Received on or after this day (in `tz`)",
+              "title": "From"
+            }
+          },
+          {
+            "description": "Received on or before this day (in `tz`)",
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Received on or before this day (in `tz`)",
+              "title": "To"
+            }
+          },
+          {
+            "description": "The IANA time zone `from` and `to` are days in, e.g. Europe/Madrid",
+            "in": "query",
+            "name": "tz",
+            "required": false,
+            "schema": {
+              "default": "UTC",
+              "description": "The IANA time zone `from` and `to` are days in, e.g. Europe/Madrid",
+              "maxLength": 64,
+              "title": "Tz",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentListOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List documents",
+        "tags": [
+          "documents"
+        ]
+      },
       "post": {
         "description": "Upload a file for processing. It belongs to the caller's organisation.\n\nDeduplicated by SHA-256 of the contents, per organisation: uploading the\nsame bytes twice returns the original document with `duplicate: true` and\nqueues no extra work. Safe to retry.",
         "operationId": "upload_documents_post",
@@ -1565,6 +2525,336 @@
         ]
       }
     },
+    "/documents/export": {
+      "get": {
+        "description": "Every document matching the filters, as CSV, up to 50,000 rows. Text that\na spreadsheet would run as a formula is prefixed with an apostrophe.",
+        "operationId": "export_documents_documents_export_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "received",
+              "enum": [
+                "received",
+                "document_date"
+              ],
+              "title": "Sort",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only documents with this outcome",
+            "in": "query",
+            "name": "outcome",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "processing",
+                    "done",
+                    "needs_review",
+                    "unsupported",
+                    "failed"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only documents with this outcome",
+              "title": "Outcome"
+            }
+          },
+          {
+            "description": "Only documents read as this processor (its name)",
+            "in": "query",
+            "name": "type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only documents read as this processor (its name)",
+              "title": "Type"
+            }
+          },
+          {
+            "description": "Matches the supplier or the file name",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Matches the supplier or the file name",
+              "title": "Q"
+            }
+          },
+          {
+            "description": "Received on or after this day (in `tz`)",
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Received on or after this day (in `tz`)",
+              "title": "From"
+            }
+          },
+          {
+            "description": "Received on or before this day (in `tz`)",
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Received on or before this day (in `tz`)",
+              "title": "To"
+            }
+          },
+          {
+            "description": "The IANA time zone `from` and `to` are days in, e.g. Europe/Madrid",
+            "in": "query",
+            "name": "tz",
+            "required": false,
+            "schema": {
+              "default": "UTC",
+              "description": "The IANA time zone `from` and `to` are days in, e.g. Europe/Madrid",
+              "maxLength": 64,
+              "title": "Tz",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/csv": {}
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Export the list as CSV",
+        "tags": [
+          "documents"
+        ]
+      }
+    },
+    "/documents/summary": {
+      "get": {
+        "description": "How many documents match the filters, by outcome, and their totals per\ncurrency -- never added across currencies.",
+        "operationId": "summarise_documents_documents_summary_get",
+        "parameters": [
+          {
+            "description": "Only documents with this outcome",
+            "in": "query",
+            "name": "outcome",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "processing",
+                    "done",
+                    "needs_review",
+                    "unsupported",
+                    "failed"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only documents with this outcome",
+              "title": "Outcome"
+            }
+          },
+          {
+            "description": "Only documents read as this processor (its name)",
+            "in": "query",
+            "name": "type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only documents read as this processor (its name)",
+              "title": "Type"
+            }
+          },
+          {
+            "description": "Matches the supplier or the file name",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Matches the supplier or the file name",
+              "title": "Q"
+            }
+          },
+          {
+            "description": "Received on or after this day (in `tz`)",
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Received on or after this day (in `tz`)",
+              "title": "From"
+            }
+          },
+          {
+            "description": "Received on or before this day (in `tz`)",
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Received on or before this day (in `tz`)",
+              "title": "To"
+            }
+          },
+          {
+            "description": "The IANA time zone `from` and `to` are days in, e.g. Europe/Madrid",
+            "in": "query",
+            "name": "tz",
+            "required": false,
+            "schema": {
+              "default": "UTC",
+              "description": "The IANA time zone `from` and `to` are days in, e.g. Europe/Madrid",
+              "maxLength": 64,
+              "title": "Tz",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentSummaryOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Count and total the documents",
+        "tags": [
+          "documents"
+        ]
+      }
+    },
+    "/documents/types": {
+      "get": {
+        "description": "The processors the caller's documents were read as, for filtering the list.",
+        "operationId": "document_types_documents_types_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/DocTypeOut"
+                  },
+                  "title": "Response Document Types Documents Types Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "The kinds of document read",
+        "tags": [
+          "documents"
+        ]
+      }
+    },
     "/documents/{document_id}": {
       "get": {
         "description": "Current status plus the full audit trail of how it got there.",
@@ -1603,6 +2893,49 @@
           }
         },
         "summary": "Get a document",
+        "tags": [
+          "documents"
+        ]
+      }
+    },
+    "/documents/{document_id}/fields": {
+      "get": {
+        "description": "One document as the client portal shows it: every field in its processor's\norder, labelled and typed, with the problem holding it in review, whether\nit was worked out rather than read, and where on the original it was\nprinted. Shaped for a person; `/result` is the shape for a system.",
+        "operationId": "get_fields_documents__document_id__fields_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "title": "Document Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentFieldsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get a document's fields, for a person to read",
         "tags": [
           "documents"
         ]

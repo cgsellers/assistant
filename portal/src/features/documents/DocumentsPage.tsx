@@ -15,6 +15,7 @@ import {
   useDocuments,
   useDocumentTypes,
   useSummary,
+  zoned,
 } from "./queries";
 import { SummaryBar } from "./SummaryBar";
 
@@ -50,7 +51,7 @@ export function DocumentsPage() {
   }
 
   const { cursor: _cursor, sort: _sort, ...filters } = query;
-  const exportUrl = apiUrl("/documents/export", { ...filters, sort: query.sort });
+  const exportUrl = apiUrl("/documents/export", zoned({ ...filters, sort: query.sort }));
 
   return (
     <>

@@ -84,6 +84,38 @@ def to_ledger(definition: Definition, data: dict) -> tuple[dict | None, str | No
     return values, None
 
 
+def to_summary(definition: Definition, data: dict) -> dict[str, Any]:
+    """
+    What the documents list shows for a document: who issued it, its own date,
+    its total. Built the moment it is read, whether or not it passes its rules.
+
+    The same mapping as `to_ledger`, but forgiving where that is strict. The
+    ledger refuses a row with no amount, rightly; the list wants exactly the
+    documents that have problems, showing what was read and leaving a gap where
+    nothing was. So a missing or unreadable value is simply None here.
+    """
+    summary: dict[str, Any] = {
+        "doc_type": definition.name,
+        "supplier": None,
+        "document_date": None,
+        "total_amount": None,
+        "total_currency": None,
+    }
+    mapping = definition.canonical
+    if mapping is None:
+        return summary
+    amount = data.get(mapping.amount)
+    summary["total_amount"] = amount if isinstance(amount, Decimal) else None
+    if mapping.occurred_on:
+        occurred = data.get(mapping.occurred_on)
+        summary["document_date"] = occurred if isinstance(occurred, date) else None
+    if mapping.counterparty:
+        summary["supplier"] = _text(data.get(mapping.counterparty), limit=200)
+    if mapping.currency:
+        summary["total_currency"] = _currency(data.get(mapping.currency))
+    return summary
+
+
 def derived_columns(definition: Definition, data: dict, derived: list[str]) -> list[str]:
     """
     The ledger columns a transform worked out, given the fields it changed.

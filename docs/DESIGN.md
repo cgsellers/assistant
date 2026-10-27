@@ -2208,6 +2208,80 @@ generated types and needs no new contract.
   contract endpoint, with the mocks as its specification. As each lands, `npm run api`
   regenerates the types and its entry leaves `contract.ts`.
 
+**Backend 1: the documents list.** `GET /documents`, `/summary`, `/types` and `/export`
+are built, and the portal's types for them now come from the API's schema. They
+matched the contract field for field: the type checker had nothing to say.
+- **A read model on the document row.** A document in review has no ledger row: the
+  worker writes one only after every rule passes, which is right for the accounting
+  record. But the list needs supplier, date and total for exactly those documents.
+  So `documents` gained five columns: processor, supplier, document date, total and
+  currency. They are filled by `canonical.to_summary` the moment a document is read,
+  whatever its rules decide. The mapping is the ledger's, made lenient: a missing total
+  is a gap, not a refusal. Corrections will update the same columns. Reading values out
+  of each extraction's JSON at query time was the alternative; it can't filter, sort or
+  page in SQL, and JSON paths differ between SQLite and Postgres.
+- **Keyset paging.** The cursor names the last row shown, so a document arriving while
+  someone reads doesn't shift the pages. The cursor is opaque to clients (base64 of the
+  sort and that row's keys); one made for the other sort order, or not made by the list
+  at all, is refused with 400. Sorting by the document's own date puts undated
+  documents last. Postgres puts NULLs first in a descending order unless told
+  otherwise, and a test that fails without `nulls_last()` proves the ordering on
+  Postgres.
+- **Days in the client's time zone.** `from` and `to` are days in `tz`, which the portal
+  sends with any date filter. In Madrid, 23:30 UTC on the 25th is the 26th.
+- **CSV that a spreadsheet can't weaponise.** Supplier names and file names come from
+  outside. A text cell starting with `=`, `+`, `-` or `@` would run as a formula in
+  Excel, so it gets an apostrophe in front. Amounts are left alone.
+- **Tenancy is not handled here at all**, and doesn't need to be: every query runs in a
+  scoped session, under RLS on Postgres. The four routes are classified
+  `client_listing` in `test_every_route.py`, which crosses each with another client's
+  key.
+- Documents read before the change: `python -m doctypes.listing backfill`, which is
+  idempotent. Compose's migrate step runs it.
+
+**Backend 2: one document's fields.** `GET /documents/{id}/fields` is built
+(`doctypes/fields.py`), and the portal's types for it now come from the API. Again they
+matched the contract exactly.
+- **Assembled from what already exists.** It uses the current extraction, the processor
+  version that read it (not the live one), the normalised values `/result` gives, the
+  transform's derived fields and the validation errors. Labels are made from field
+  names, with acronyms kept in capitals ("Vendor tax ID", "PO number").
+- **Each problem sits at its field.** A validation message names its field first
+  ("total is required…", "line_items[2].amount…"), so it is shown at that field, with
+  field names turned into labels so it reads as a sentence. A rule's own message names
+  no field and is shown as a problem with the document as a whole.
+- **History in the client's words:** received, recognised as an invoice, held for
+  review, ready, added to the ledger. Internal steps such as "text read" are left out.
+- **Locations, found after the fact** (`doctypes/locate.py`). The model returns values,
+  not positions, so each value is looked for in the OCR's words, in the forms
+  documents print it:
+  - text across the words of a line;
+  - amounts as numbers, with either decimal mark;
+  - dates both day-first and month-first, with month names in seven languages,
+    including the Spanish "24 de octubre de 2026".
+
+  A wrong highlight is worse than none, so the matching is cautious:
+  - small whole numbers are never looked for;
+  - a repeated value goes to the line carrying the field's label, from its name and the
+    capitalised words in its processor's description ("labelled TOTAL");
+  - a list row goes to the line carrying most of its values;
+  - a derived value points nowhere, since it wasn't printed.
+
+  Checked against a real invoice, this found 11 of 11 printed values. It also caught a
+  mistake first: the tax row "VAT" had been placed on "VAT No GB987654321" in the
+  header, until rows were matched on all their values.
+- **Page sizes, recorded from now on.** A box becomes a place on the page only with the
+  page's size, which no engine stored. Now all three report it, in their boxes' own
+  units: the PDF text layer, Tesseract (from its page row) and the PP-OCR container
+  (rendered or image size). The worker stores it on `ocr_results.page_sizes`. Documents
+  read before this have values but no highlights, until they are read again.
+- **Photos are turned upright before OCR** (`ocr/orientation.py`, shared with the
+  container). Phones store photos sideways with an EXIF tag, which browsers obey and
+  engines didn't agree on: Tesseract ignores it, OpenCV applies it. Now every engine
+  reads the page a person sees, so boxes land where the portal draws them. Checked on
+  the rebuilt container with a sideways photo carrying orientation 6: the page came
+  back portrait and the total where it was drawn.
+
 ### 9.2 Why Postgres
 
 SQLite was right for getting started: nothing to run, and a suite of several hundred
