@@ -2082,6 +2082,47 @@ Found on the way:
     the transform works out.
   - A test opens the generated PDFs with the real PDF.js and reads the formats back.
 
+**5.4 built: the client fixes what needs review.** Contract: `PATCH /documents/{id}/fields`,
+plus `required`, `location`, `corrected`, `revision` and `history` on the GET.
+- **Fixing.** "Review and fix" opens the fields as inputs typed by kind, starting at the
+  first flagged field. Line items can be edited, added and removed. Only what changed is
+  sent; a list is sent whole.
+- **The server checks again.** It re-runs the processor's transform, then its rules, on
+  the corrected values. With no problems left the document is done. Correcting a
+  subtotal recalculates a derived total, and the rules may then find the lines no longer
+  add up: the client sees exactly what an import would.
+- **Approving as it is.** Sometimes the supplier is the one who got it wrong. Approval
+  is deliberate (a confirmation, with focus on Cancel), and the problem stays on record.
+  It covers the values approved: the next correction re-checks from scratch.
+- **No lost updates.** Every PATCH names the `revision` it was made against, and a stale
+  one is refused with 409, as processor publishing does with `based_on_version`. The
+  page then shows the latest version and says the edits were not saved, because they
+  were made against values that are no longer there.
+- **The audit trail is visible.** A corrected value shows what was read before ("Read as
+  €91.19 · changed by bo@acme.test"), and the document's history lists who corrected or
+  approved what. The same records become eval labels in step 7.
+- **Amounts are parsed without guessing.** People type amounts the way their locale writes
+  them, so `1,234.56`, `1.234,56`, `1 234,56` and `12,5` are all read correctly. `1,234`
+  and `12.345` are refused: one separator and three digits is a thousands separator in
+  one locale and a decimal point in another, and a wrong guess is off by a factor of a
+  thousand.
+- **Pointing at the original.** Hovering a field, or focusing its input, highlights where
+  it was read; the locate button pins it and scrolls to it. A `location` is a page and a
+  box in fractions of that page, so it holds at any zoom. The backend will find it by
+  matching the read value against the OCR's words. It is null when the value wasn't
+  printed (a calculated total) or can't be matched, and the page then offers nothing.
+- **Unsaved edits** ask before the page is left, both in the app and on closing the tab.
+
+Found on the way:
+- A test caught "Add a row" saving the form. A `<button>` with no `type` submits whatever
+  form it sits in. The shared `Button` now defaults to `type="button"`, and submitting is
+  opt-in.
+- Sonner keeps toasts in a module-level store and replays the active ones to any new
+  Toaster, so one test's toasts appeared in the next. The test setup dismisses them.
+- The mock originals now say where they printed each value. The receipt is laid out
+  first, then drawn and measured from the same layout, so a highlight lands on what was
+  drawn. The boxes were checked by drawing them over a rendered invoice.
+
 ### 9.2 Why Postgres
 
 SQLite was right for getting started: nothing to run, and a suite of several hundred

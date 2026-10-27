@@ -30,7 +30,16 @@ type ButtonProps = ComponentProps<"button"> &
     asChild?: boolean;
   };
 
-export function Button({ className, variant, size, asChild = false, ...props }: ButtonProps) {
-  const Component = asChild ? Slot : "button";
-  return <Component className={cn(buttonVariants({ variant, size }), className)} {...props} />;
+export function Button({ className, variant, size, asChild = false, type, ...props }: ButtonProps) {
+  if (asChild)
+    return <Slot className={cn(buttonVariants({ variant, size }), className)} {...props} />;
+  // A plain button, unless it says otherwise: the browser's default, "submit",
+  // makes any button that ends up inside a form send it.
+  return (
+    <button
+      type={type ?? "button"}
+      className={cn(buttonVariants({ variant, size }), className)}
+      {...props}
+    />
+  );
 }

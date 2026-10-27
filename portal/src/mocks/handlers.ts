@@ -1,9 +1,7 @@
 import { HttpResponse, http } from "msw";
-import type { components } from "@/api/schema";
 import { singleDocumentHandlers } from "./document";
 import { documentHandlers } from "./documents";
-
-type Me = components["schemas"]["MeOut"];
+import { MOCK_PASSWORD, MOCK_USER } from "./user";
 
 /**
  * The API as the portal expects it, for running without a backend and for
@@ -11,18 +9,7 @@ type Me = components["schemas"]["MeOut"];
  * the real response. Endpoints the API does not have yet are mocked here
  * first: each handler is the contract the backend then has to meet.
  */
-export const MOCK_USER: Me = {
-  kind: "user",
-  name: "bo@acme.test",
-  role: "author",
-  organisation_id: "org-acme",
-  organisation_name: "Acme Ltd",
-  is_staff: false,
-  csrf_token: "mock-csrf",
-  csrf_header: "x-csrf-token",
-};
-
-export const MOCK_PASSWORD = "correct horse battery";
+export { MOCK_PASSWORD, MOCK_USER };
 
 let signedIn = false;
 

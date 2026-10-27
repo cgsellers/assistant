@@ -1,4 +1,4 @@
-import { ApiError } from "@/lib/api";
+import { ApiError, csrfHeaders } from "@/lib/api";
 
 /**
  * For the endpoints in src/api/contract.ts, which the generated client does
@@ -13,20 +13,42 @@ export function apiUrl(path: string, params: Record<string, string | number | un
   return url;
 }
 
+/** The API's explanation of a failure, as an ApiError. */
+async function failure(response: Response): Promise<ApiError> {
+  let detail = response.statusText || "Something went wrong";
+  let fields: Record<string, string> = {};
+  try {
+    const body = (await response.json()) as { detail?: unknown; fields?: unknown };
+    if (typeof body.detail === "string") detail = body.detail;
+    if (body.fields && typeof body.fields === "object")
+      fields = body.fields as Record<string, string>;
+  } catch {
+    // Not JSON: the status text will do.
+  }
+  return new ApiError(response.status, detail, fields);
+}
+
 export async function getJson<T>(
   path: string,
   params: Record<string, string | number | undefined> = {},
 ): Promise<T> {
   const response = await globalThis.fetch(apiUrl(path, params), { credentials: "same-origin" });
-  if (!response.ok) {
-    let detail = response.statusText || "Something went wrong";
-    try {
-      const body = (await response.json()) as { detail?: unknown };
-      if (typeof body.detail === "string") detail = body.detail;
-    } catch {
-      // Not JSON: the status text will do.
-    }
-    throw new ApiError(response.status, detail);
-  }
+  if (!response.ok) throw await failure(response);
+  return (await response.json()) as T;
+}
+
+/** A change, with the session's CSRF token; the answer as JSON. */
+export async function sendJson<T>(
+  method: "POST" | "PUT" | "PATCH" | "DELETE",
+  path: string,
+  body: unknown,
+): Promise<T> {
+  const response = await globalThis.fetch(apiUrl(path), {
+    method,
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json", ...csrfHeaders() },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) throw await failure(response);
   return (await response.json()) as T;
 }

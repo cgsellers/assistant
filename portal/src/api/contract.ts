@@ -75,27 +75,57 @@ export type FieldType = "string" | "integer" | "number" | "money" | "date" | "bo
 /** A single value: money as "104.88", dates as YYYY-MM-DD -- the same wire form as /result. */
 export type FieldValue = string | number | boolean | null;
 
+/**
+ * Where on the original a value was read: a page (from 1) and a box on it, as
+ * fractions of the page's width and height from its top-left corner. Found by
+ * matching the value against the OCR's words, so null when it was not printed
+ * (a calculated total) or could not be matched.
+ */
+export interface Location {
+  page: number;
+  /** [left, top, right, bottom], each from 0 to 1. */
+  box: [number, number, number, number];
+}
+
+/** A value someone changed by hand, and what had been read before. */
+export interface Correction {
+  /** Who: the signed-in user's name. */
+  by: string;
+  at: string;
+  /** The value as read. Null for a list, whose rows are replaced whole. */
+  was: FieldValue;
+}
+
 interface FieldBase {
   /** The key in /result's `data`. */
   name: string;
   /** For people: "Invoice number" for invoice_number. */
   label: string;
+  /** The processor's rules refuse the document without it. */
+  required: boolean;
   /** Worked out by the processor's transform rather than read off the page. */
   derived: boolean;
   /** Why this field holds the document in review, or null. */
   problem: string | null;
+  /** Set once someone has changed it. */
+  corrected: Correction | null;
 }
 
 export interface ScalarField extends FieldBase {
   type: FieldType;
   value: FieldValue;
+  location: Location | null;
 }
+
+export type ListRow = Record<string, FieldValue>;
 
 /** A repeated group, such as line items: shown as a table. */
 export interface ListField extends FieldBase {
   type: "list";
   columns: { name: string; label: string; type: FieldType }[];
-  rows: Record<string, FieldValue>[];
+  rows: ListRow[];
+  /** Where each row was read, in the same order as `rows`. */
+  row_locations: (Location | null)[];
 }
 
 export type Field = ScalarField | ListField;
@@ -119,4 +149,34 @@ export interface DocumentFields {
   problems: string[];
   /** When the fields were read: ISO 8601, or null. */
   read_at: string | null;
+  /**
+   * Goes up with every change. A PATCH names the revision it was made
+   * against, and is refused (409) if someone else saved in between.
+   */
+  revision: number;
+  /** What happened to the document, oldest first. */
+  history: { at: string; what: string; by: string | null }[];
+}
+
+/**
+ * PATCH /documents/{id}/fields: correct values, approve, or both.
+ *
+ * The server re-runs the processor's transform and rules on the result.
+ * With no problems left the document is done; with problems left it stays in
+ * review unless `approve` says to accept it as it is. The answer is the
+ * document's new DocumentFields.
+ *
+ * 409 when `revision` is not the current one; 422 when a value does not fit
+ * its field, with `fields` saying which.
+ */
+export interface FieldsPatch {
+  revision: number;
+  /** Only the fields that changed. A list is sent whole. */
+  values: Record<string, FieldValue | ListRow[]>;
+  approve?: boolean;
+}
+
+export interface FieldsRefused {
+  detail: string;
+  fields?: Record<string, string>;
 }

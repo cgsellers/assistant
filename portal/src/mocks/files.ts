@@ -1,18 +1,54 @@
+import type { Location } from "@/api/contract";
 import { BILL_TO, type Sale } from "./sales";
 
 /**
  * The originals the mock API serves: each invoice as a real PDF, each receipt
  * as a photo, drawn from the same sale its fields were read from. Printed the
  * way the supplier prints -- "€ 1.234,56", "10/21/2026" -- so the page shows
- * what normalising does.
+ * what normalising does. Each also says where it printed every value, which
+ * is what the page highlights when a field is pointed at.
  */
+
+/** Where printed values sit, by field key ("total", "line_items.2"). */
+export type Locations = Map<string, Location>;
+
+type Box = [number, number, number, number];
+
+function union(a: Box | undefined, b: Box): Box {
+  return a
+    ? [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[2], b[2]), Math.max(a[3], b[3])]
+    : b;
+}
+
+/** Boxes in some unit, as fractions of a page `width` x `height`, padded a little. */
+function toLocations(
+  boxes: Map<string, Box>,
+  width: number,
+  height: number,
+  pad: number,
+): Locations {
+  return new Map(
+    [...boxes].map(([key, [l, t, r, b]]) => [
+      key,
+      {
+        page: 1,
+        box: [
+          Math.max(0, (l - pad) / width),
+          Math.max(0, (t - pad) / height),
+          Math.min(1, (r + pad) / width),
+          Math.min(1, (b + pad) / height),
+        ],
+      },
+    ]),
+  );
+}
 
 // --- Printing in the supplier's own style ----------------------------------------
 
 function money(sale: Sale, cents: number): string {
   return new Intl.NumberFormat(sale.details.locale, { style: "currency", currency: sale.currency })
     .format(cents / 100)
-    .replace(/[  ]/g, " ");
+    .replace(/[\u00a0\u202f]/g, " ");
 }
 
 function number(sale: Sale, cents: number): string {
@@ -34,6 +70,9 @@ function date(sale: Sale, isoDate: string): string {
 // --- A PDF, by hand ---------------------------------------------------------------
 // One A4 page, the built-in Helvetica (nothing to embed), text, rules and fills.
 
+const PAGE_W = 595;
+const PAGE_H = 842;
+
 /** Helvetica's advance widths for ASCII 32-126, in thousandths of the font size. */
 const WIDTHS = [
   278, 278, 355, 556, 556, 889, 667, 191, 333, 333, 389, 584, 278, 333, 278, 278, 556, 556, 556,
@@ -46,7 +85,7 @@ const WIDTHS = [
 function width(text: string, size: number, bold: boolean): number {
   let total = 0;
   for (const char of text) total += WIDTHS[(char.codePointAt(0) ?? 0) - 32] ?? 556;
-  return (total * size * (bold ? 1.06 : 1)) / 1000;
+  return (total * size * (bold ? 1.1 : 1)) / 1000;
 }
 
 /** WinAnsi codes for the characters outside ASCII that suppliers print. */
@@ -72,18 +111,28 @@ const MUTED: Rgb = [0.45, 0.45, 0.5];
 
 class Page {
   private ops: string[] = [];
+  /** In PDF points, measured from the top-left like the page is read. */
+  private boxes = new Map<string, Box>();
 
   text(
     x: number,
     y: number,
     text: string,
-    { size = 10, bold = false, colour = INK, align = "left" } = {},
+    { size = 10, bold = false, colour = INK, align = "left", key = "" } = {},
   ) {
-    const left = align === "right" ? x - width(text, size, bold) : x;
+    const w = width(text, size, bold);
+    const left = align === "right" ? x - w : x;
     const [r, g, b] = colour;
     this.ops.push(
       `BT /${bold ? "F2" : "F1"} ${size} Tf ${r} ${g} ${b} rg ${left.toFixed(2)} ${y} Td ${pdfString(text)} Tj ET`,
     );
+    // The baseline is at y; capitals rise about 0.75 of the size, descenders drop 0.22.
+    if (key) this.mark(key, [left, PAGE_H - y - size * 0.8, left + w, PAGE_H - y + size * 0.25]);
+  }
+
+  /** Note that `key` covers this box too: a value over several lines, or a whole table row. */
+  mark(key: string, box: Box) {
+    this.boxes.set(key, union(this.boxes.get(key), box));
   }
 
   fill(x: number, y: number, w: number, h: number, [r, g, b]: Rgb) {
@@ -94,12 +143,16 @@ class Page {
     this.ops.push(`${grey} G 0.6 w ${x1} ${y1} m ${x2} ${y2} l S`);
   }
 
+  locations(): Locations {
+    return toLocations(this.boxes, PAGE_W, PAGE_H, 3);
+  }
+
   toPdf(): Uint8Array {
     const content = this.ops.join("\n");
     const objects = [
       "<< /Type /Catalog /Pages 2 0 R >>",
       "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-      "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R /F2 5 0 R >> >> /Contents 6 0 R >>",
+      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PAGE_W} ${PAGE_H}] /Resources << /Font << /F1 4 0 R /F2 5 0 R >> >> /Contents 6 0 R >>`,
       "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
       "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>",
       `<< /Length ${content.length} >>\nstream\n${content}\nendstream`,
@@ -119,44 +172,46 @@ class Page {
   }
 }
 
-export function invoicePdf(sale: Sale): Uint8Array {
+function invoiceLayout(sale: Sale): Page {
   const page = new Page();
   const { details } = sale;
   const L = 50;
   const R = 545;
+  const delivery = sale.variant === "delivery_note";
+  // A delivery note was never read, so nothing on it is anyone's field.
+  const key = (name: string) => (delivery ? "" : name);
 
-  page.fill(0, 822, 595, 20, details.colour);
-  page.text(L, 772, sale.supplier, { size: 18, bold: true });
+  page.fill(0, 822, PAGE_W, 20, details.colour);
+  page.text(L, 772, sale.supplier, { size: 18, bold: true, key: key("vendor") });
   details.address.forEach((line, i) => {
     page.text(L, 754 - i * 13, line, { size: 9, colour: MUTED });
   });
-  page.text(L, 728, details.taxId, { size: 9, colour: MUTED });
+  page.text(L, 728, details.taxId, { size: 9, colour: MUTED, key: key("vendor_tax_id") });
 
-  const delivery = sale.variant === "delivery_note";
   page.text(R, 772, delivery ? "DELIVERY NOTE" : "INVOICE", {
     size: 20,
     bold: true,
     align: "right",
   });
-  const meta: [string, string][] = delivery
+  const meta: [string, string, string][] = delivery
     ? [
-        ["Delivery no.", `DN-${50200 + sale.index}`],
-        ["Shipped", date(sale, sale.issued)],
+        ["Delivery no.", `DN-${50200 + sale.index}`, ""],
+        ["Shipped", date(sale, sale.issued), ""],
       ]
     : [
-        ["Invoice no.", sale.number],
-        ["Date", date(sale, sale.issued)],
-        ["Due date", date(sale, sale.due)],
-        ["PO number", sale.po],
+        ["Invoice no.", sale.number, "invoice_number"],
+        ["Date", date(sale, sale.issued), "issued_on"],
+        ["Due date", date(sale, sale.due), "due_date"],
+        ["PO number", sale.po, "po_number"],
       ];
-  meta.forEach(([label, value], i) => {
+  meta.forEach(([label, value, name], i) => {
     page.text(390, 748 - i * 14, label, { size: 9, colour: MUTED });
-    page.text(R, 748 - i * 14, value, { size: 9, align: "right" });
+    page.text(R, 748 - i * 14, value, { size: 9, align: "right", key: name });
   });
 
   page.text(L, 690, delivery ? "DELIVER TO" : "BILL TO", { size: 8, bold: true, colour: MUTED });
   BILL_TO.forEach((line, i) => {
-    page.text(L, 675 - i * 14, line, { size: 10, bold: i === 0 });
+    page.text(L, 675 - i * 14, line, { size: 10, bold: i === 0, key: key("bill_to") });
   });
 
   let y = 600;
@@ -167,8 +222,9 @@ export function invoicePdf(sale: Sale): Uint8Array {
     page.text(455, y, "Unit price", { size: 9, bold: true, align: "right" });
     page.text(R - 8, y, "Amount", { size: 9, bold: true, align: "right" });
   }
-  for (const line of sale.lines) {
+  sale.lines.forEach((line, i) => {
     y -= 24;
+    if (!delivery) page.mark(`line_items.${i}`, [L, PAGE_H - y - 15, R, PAGE_H - y + 8]);
     page.text(L + 8, y, line.description);
     page.text(370, y, String(line.quantity), { align: "right" });
     if (!delivery) {
@@ -176,7 +232,7 @@ export function invoicePdf(sale: Sale): Uint8Array {
       page.text(R - 8, y, number(sale, line.amount), { align: "right" });
     }
     page.rule(L, y - 9, R, y - 9);
-  }
+  });
 
   y -= 40;
   if (delivery) {
@@ -184,15 +240,18 @@ export function invoicePdf(sale: Sale): Uint8Array {
   } else if (sale.variant === "cut_off") {
     page.text(R, y, "Continued on page 2", { size: 9, colour: MUTED, align: "right" });
   } else {
-    const totals: [string, number, boolean][] = [
-      ["Subtotal", sale.subtotal, false],
-      [`${details.taxName} ${details.taxRate}%`, sale.tax, false],
+    const totals: [string, number, boolean, string][] = [
+      ["Subtotal", sale.subtotal, false, "subtotal"],
+      [`${details.taxName} ${details.taxRate}%`, sale.tax, false, "tax_amount"],
     ];
-    if (sale.variant !== "no_total_printed") totals.push(["Total due", sale.total, true]);
-    for (const [label, cents, bold] of totals) {
+    if (sale.variant !== "no_total_printed") totals.push(["Total due", sale.total, true, "total"]);
+    for (const [label, cents, bold, name] of totals) {
+      const size = bold ? 12 : 10;
       if (bold) page.rule(370, y + 14, R, y + 14, 0.3);
-      page.text(370, y, label, { size: bold ? 12 : 10, bold });
-      page.text(R - 8, y, money(sale, cents), { size: bold ? 12 : 10, bold, align: "right" });
+      page.text(370, y, label, { size, bold });
+      page.text(R - 8, y, money(sale, cents), { size, bold, align: "right", key: name });
+      // The tax line is also the one row of the taxes table.
+      if (name === "tax_amount") page.mark("taxes.0", [370, PAGE_H - y - size, R, PAGE_H - y + 4]);
       y -= 20;
     }
   }
@@ -212,10 +271,151 @@ export function invoicePdf(sale: Sale): Uint8Array {
     colour: MUTED,
     align: "right",
   });
-  return page.toPdf();
+  return page;
+}
+
+export function invoicePdf(sale: Sale): Uint8Array {
+  return invoiceLayout(sale).toPdf();
+}
+
+export function invoiceLocations(sale: Sale): Locations {
+  return invoiceLayout(sale).locations();
 }
 
 // --- A receipt, photographed --------------------------------------------------------
+
+interface Written {
+  text: string;
+  x: number;
+  y: number;
+  size: number;
+  bold: boolean;
+  align: CanvasTextAlign;
+}
+
+interface ReceiptLayout {
+  width: number;
+  height: number;
+  paper: { width: number; height: number; degrees: number };
+  written: Written[];
+  /** Field key -> its box on the paper, before the paper is turned. */
+  boxes: Map<string, Box>;
+}
+
+/** Courier advances 0.6 of its size per character, so text can be measured without a canvas. */
+const COURIER = 0.6;
+
+/** Where everything on a receipt goes. Pure: the photo is drawn from it, and the locations measured. */
+function receiptLayout(sale: Sale): ReceiptLayout {
+  const paperWidth = 380;
+  const lineHeight = 22;
+  const torn = sale.variant === "cut_off";
+  const rows = 9 + sale.lines.length + (torn ? 0 : 7);
+  const paperHeight = rows * lineHeight + 60;
+  const written: Written[] = [];
+  const boxes = new Map<string, Box>();
+
+  const left = 24;
+  const right = paperWidth - 24;
+  const centre = paperWidth / 2;
+  let y = 44;
+  const write = (
+    text: string,
+    x: number,
+    align: CanvasTextAlign = "left",
+    size = 15,
+    bold = false,
+    key = "",
+  ) => {
+    written.push({ text, x, y, size, bold, align });
+    if (!key) return;
+    const w = text.length * size * COURIER;
+    const l = align === "center" ? x - w / 2 : align === "right" ? x - w : x;
+    boxes.set(key, union(boxes.get(key), [l, y - size * 0.8, l + w, y + size * 0.25]));
+  };
+  const next = (lines = 1) => {
+    y += lineHeight * lines;
+  };
+  const dashes = () => {
+    write("-".repeat(36), centre, "center");
+    next();
+  };
+
+  write(sale.supplier.toUpperCase(), centre, "center", 20, true, "vendor");
+  next(1.3);
+  for (const line of sale.details.address) {
+    write(line, centre, "center", 13);
+    next(0.85);
+  }
+  write(sale.details.taxId, centre, "center", 13, false, "tax_id");
+  next(1.4);
+  write(date(sale, sale.issued), left, "left", 15, false, "issued_on");
+  write(sale.time, left + 150, "left");
+  write(`No. ${sale.number}`, right, "right");
+  next();
+  dashes();
+  sale.lines.forEach((line, i) => {
+    const label = line.quantity > 1 ? `${line.quantity} x ${line.description}` : line.description;
+    write(label.slice(0, 28), left, "left", 15, false, `line_items.${i}`);
+    write(number(sale, line.amount), right, "right", 15, false, `line_items.${i}`);
+    next();
+  });
+  if (!torn) {
+    dashes();
+    write(`TOTAL ${sale.currency}`, left, "left", 18, true, "total");
+    write(number(sale, sale.total), right, "right", 18, true, "total");
+    next(1.3);
+    write(
+      `${sale.details.taxName} ${sale.details.taxRate}% incl.`,
+      left,
+      "left",
+      13,
+      false,
+      "tax_amount",
+    );
+    write(number(sale, sale.tax), right, "right", 13, false, "tax_amount");
+    next();
+    write(sale.details.payment ?? "", left, "left", 13, false, "payment_method");
+    next(1.6);
+    const thanks =
+      sale.details.locale === "es-ES"
+        ? "GRACIAS POR SU COMPRA"
+        : sale.details.locale === "it-IT"
+          ? "GRAZIE E ARRIVEDERCI"
+          : "THANK YOU";
+    write(thanks, centre, "center", 13);
+  }
+  return {
+    width: 560,
+    height: paperHeight + 140,
+    paper: { width: paperWidth, height: paperHeight, degrees: (sale.index % 2 ? 1 : -1) * 1.4 },
+    written,
+    boxes,
+  };
+}
+
+/** Where each value sits in the photo: its box on the paper, turned as the paper is turned. */
+export function receiptLocations(sale: Sale): Locations {
+  const layout = receiptLayout(sale);
+  const { paper } = layout;
+  const angle = (paper.degrees * Math.PI) / 180;
+  const turn = (x: number, y: number): [number, number] => {
+    const dx = x - paper.width / 2;
+    const dy = y - paper.height / 2;
+    return [
+      layout.width / 2 + dx * Math.cos(angle) - dy * Math.sin(angle),
+      layout.height / 2 + dx * Math.sin(angle) + dy * Math.cos(angle),
+    ];
+  };
+  const turned = new Map<string, Box>();
+  for (const [key, [l, t, r, b]] of layout.boxes) {
+    const corners = [turn(l, t), turn(r, t), turn(r, b), turn(l, b)];
+    const xs = corners.map(([x]) => x);
+    const ys = corners.map(([, y]) => y);
+    turned.set(key, [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]);
+  }
+  return toLocations(turned, layout.width, layout.height, 4);
+}
 
 /** A 1x1 PNG: where there is no canvas to draw on (the tests), any image will do. */
 const BLANK_PNG = Uint8Array.from(
@@ -227,13 +427,9 @@ const BLANK_PNG = Uint8Array.from(
 
 export async function receiptPhoto(sale: Sale): Promise<{ bytes: Uint8Array; type: string }> {
   if (typeof OffscreenCanvas === "undefined") return { bytes: BLANK_PNG, type: "image/png" };
-
-  const paperWidth = 380;
-  const lineHeight = 22;
-  const torn = sale.variant === "cut_off";
-  const rows = 9 + sale.lines.length + (torn ? 0 : 7);
-  const paperHeight = rows * lineHeight + 60;
-  const canvas = new OffscreenCanvas(560, paperHeight + 140);
+  const layout = receiptLayout(sale);
+  const { paper } = layout;
+  const canvas = new OffscreenCanvas(layout.width, layout.height);
   const ctx = canvas.getContext("2d");
   if (!ctx) return { bytes: BLANK_PNG, type: "image/png" };
 
@@ -247,8 +443,8 @@ export async function receiptPhoto(sale: Sale): Promise<{ bytes: Uint8Array; typ
   ctx.save();
   if (sale.variant === "unreadable") ctx.filter = "blur(5px) brightness(0.55)";
   ctx.translate(canvas.width / 2, canvas.height / 2);
-  ctx.rotate(((sale.index % 2 ? 1 : -1) * 1.4 * Math.PI) / 180);
-  ctx.translate(-paperWidth / 2, -paperHeight / 2);
+  ctx.rotate((paper.degrees * Math.PI) / 180);
+  ctx.translate(-paper.width / 2, -paper.height / 2);
 
   ctx.shadowColor = "rgba(0,0,0,0.45)";
   ctx.shadowBlur = 24;
@@ -256,79 +452,23 @@ export async function receiptPhoto(sale: Sale): Promise<{ bytes: Uint8Array; typ
   ctx.fillStyle = "#fbfaf6";
   ctx.beginPath();
   ctx.moveTo(0, 0);
-  ctx.lineTo(paperWidth, 0);
-  if (torn) {
+  ctx.lineTo(paper.width, 0);
+  if (sale.variant === "cut_off") {
     // Torn off below the last line: a ragged edge where the totals were.
-    for (let x = paperWidth; x >= 0; x -= 14) ctx.lineTo(x, paperHeight - (x % 28 ? 10 : 0));
+    for (let x = paper.width; x >= 0; x -= 14) ctx.lineTo(x, paper.height - (x % 28 ? 10 : 0));
   } else {
-    ctx.lineTo(paperWidth, paperHeight);
-    ctx.lineTo(0, paperHeight);
+    ctx.lineTo(paper.width, paper.height);
+    ctx.lineTo(0, paper.height);
   }
   ctx.closePath();
   ctx.fill();
   ctx.shadowColor = "transparent";
 
-  const left = 24;
-  const right = paperWidth - 24;
-  let y = 44;
   ctx.fillStyle = "#26262b";
-  const write = (
-    text: string,
-    x: number,
-    align: CanvasTextAlign = "left",
-    size = 15,
-    bold = false,
-  ) => {
+  for (const { text, x, y, size, bold, align } of layout.written) {
     ctx.font = `${bold ? "bold " : ""}${size}px "Courier New", Courier, monospace`;
     ctx.textAlign = align;
     ctx.fillText(text, x, y);
-  };
-  const next = (lines = 1) => {
-    y += lineHeight * lines;
-  };
-  const dashes = () => {
-    write("-".repeat(36), paperWidth / 2, "center");
-    next();
-  };
-
-  write(sale.supplier.toUpperCase(), paperWidth / 2, "center", 20, true);
-  next(1.3);
-  for (const line of sale.details.address) {
-    write(line, paperWidth / 2, "center", 13);
-    next(0.85);
-  }
-  write(sale.details.taxId, paperWidth / 2, "center", 13);
-  next(1.4);
-  write(`${date(sale, sale.issued)}  ${sale.time}`, left);
-  write(`No. ${sale.number}`, right, "right");
-  next();
-  dashes();
-  for (const line of sale.lines) {
-    const label = line.quantity > 1 ? `${line.quantity} x ${line.description}` : line.description;
-    write(label.slice(0, 28), left);
-    write(number(sale, line.amount), right, "right");
-    next();
-  }
-  if (!torn) {
-    dashes();
-    write(`TOTAL ${sale.currency}`, left, "left", 18, true);
-    write(number(sale, sale.total), right, "right", 18, true);
-    next(1.3);
-    write(`${sale.details.taxName} ${sale.details.taxRate}% incl.`, left, "left", 13);
-    write(number(sale, sale.tax), right, "right", 13);
-    next();
-    write(sale.details.payment ?? "", left, "left", 13);
-    next(1.6);
-    write(
-      sale.details.locale === "es-ES"
-        ? "GRACIAS POR SU COMPRA"
-        : sale.details.locale === "it-IT"
-          ? "GRAZIE E ARRIVEDERCI"
-          : "THANK YOU",
-      paperWidth / 2,
-      "center",
-      13,
-    );
   }
   ctx.restore();
 

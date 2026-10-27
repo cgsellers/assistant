@@ -7,6 +7,7 @@ import type {
   Money,
   Outcome,
 } from "@/api/contract";
+import { savedFor } from "./corrections";
 
 /**
  * Acme's documents, as the mock API serves them. Deterministic -- the same
@@ -89,7 +90,9 @@ function filtered(url: URL): DocumentRow[] {
   const to = url.searchParams.get("to");
   const sort = url.searchParams.get("sort") ?? "received";
 
-  const rows = MOCK_DOCUMENTS.filter((row) => {
+  // As they are now: corrections change a row's status, supplier, date and total.
+  const current = MOCK_DOCUMENTS.map((row) => ({ ...row, ...savedFor(row.id)?.row }));
+  const rows = current.filter((row) => {
     if (outcome && row.outcome !== outcome) return false;
     if (type && row.type?.name !== type) return false;
     if (q && !`${row.supplier ?? ""} ${row.filename ?? ""}`.toLowerCase().includes(q)) return false;

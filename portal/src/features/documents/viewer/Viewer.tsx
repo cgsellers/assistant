@@ -2,6 +2,7 @@ import { Download, ExternalLink, FileWarning, Maximize2, ZoomIn, ZoomOut } from 
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
+import { Highlight, type Pointing } from "./Highlight";
 
 const PdfPages = lazy(() => import("./PdfPages"));
 
@@ -28,17 +29,21 @@ function useWidth() {
 
 /**
  * The original document, beside what was read from it: a PDF's pages or the
- * photo, as uploaded. Anything the browser cannot show -- a TIFF outside
- * Safari, a damaged PDF -- falls back to downloading it.
+ * photo, as uploaded, with the value being looked at highlighted on it.
+ * Anything the browser cannot show -- a TIFF outside Safari, a damaged PDF --
+ * falls back to downloading it.
  */
 export function Viewer({
   url,
   mimeType,
   filename,
+  pointing = null,
 }: {
   url: string;
   mimeType: string;
   filename: string;
+  /** Where on the original to highlight: the value being looked at or corrected. */
+  pointing?: Pointing | null;
 }) {
   const [zoom, setZoom] = useState(FIT);
   const [failed, setFailed] = useState(false);
@@ -115,16 +120,20 @@ export function Viewer({
               </div>
             }
           >
-            <PdfPages url={url} width={shown} onError={() => setFailed(true)} />
+            <PdfPages url={url} width={shown} pointing={pointing} onError={() => setFailed(true)} />
           </Suspense>
         ) : (
-          <img
-            src={url}
-            alt={`The original: ${filename}`}
-            style={{ width: shown }}
-            className="mx-auto max-w-none rounded-sm shadow-pop"
-            onError={() => setFailed(true)}
-          />
+          <div className="relative mx-auto" style={{ width: shown }}>
+            <img
+              src={url}
+              alt={`The original: ${filename}`}
+              className="block w-full rounded-sm shadow-pop"
+              onError={() => setFailed(true)}
+            />
+            {pointing?.location.page === 1 && (
+              <Highlight box={pointing.location.box} scroll={pointing.scroll} />
+            )}
+          </div>
         )}
       </div>
     </section>

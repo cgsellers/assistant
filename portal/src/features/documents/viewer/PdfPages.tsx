@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 import "react-pdf/dist/Page/TextLayer.css";
 import { Spinner } from "@/components/ui/spinner";
+import { Highlight, type Pointing } from "./Highlight";
 
 // PDF.js parses in a worker, served from our own origin like everything else.
 pdfjs.GlobalWorkerOptions.workerSrc = workerSrc;
@@ -18,10 +19,12 @@ const A4 = 297 / 210;
 export default function PdfPages({
   url,
   width,
+  pointing,
   onError,
 }: {
   url: string;
   width: number;
+  pointing: Pointing | null;
   onError: () => void;
 }) {
   const [pages, setPages] = useState(0);
@@ -36,15 +39,19 @@ export default function PdfPages({
       className="flex flex-col items-center gap-4"
     >
       {Array.from({ length: pages }, (_, i) => (
-        <Page
-          // biome-ignore lint/suspicious/noArrayIndexKey: a page's number is its identity
-          key={i}
-          pageNumber={i + 1}
-          width={width}
-          renderAnnotationLayer={false}
-          loading={<div style={{ width, height: width * A4 }} className="bg-surface" />}
-          className="overflow-hidden rounded-sm bg-surface shadow-pop"
-        />
+        // biome-ignore lint/suspicious/noArrayIndexKey: a page's number is its identity
+        <div key={i} className="relative">
+          <Page
+            pageNumber={i + 1}
+            width={width}
+            renderAnnotationLayer={false}
+            loading={<div style={{ width, height: width * A4 }} className="bg-surface" />}
+            className="overflow-hidden rounded-sm bg-surface shadow-pop"
+          />
+          {pointing?.location.page === i + 1 && (
+            <Highlight box={pointing.location.box} scroll={pointing.scroll} />
+          )}
+        </div>
       ))}
     </Document>
   );

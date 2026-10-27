@@ -1,4 +1,4 @@
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo } from "react";
 import { useSearchParams } from "react-router";
 import type {
@@ -7,10 +7,11 @@ import type {
   DocumentQuery,
   DocumentSummary,
   DocumentTypes,
+  FieldsPatch,
   Outcome,
   SortKey,
 } from "@/api/contract";
-import { getJson } from "@/lib/http";
+import { getJson, sendJson } from "@/lib/http";
 
 export const PAGE_SIZE = 25;
 
@@ -117,5 +118,25 @@ export function useDocumentFields(id: string) {
     queryFn: () => getJson<DocumentFields>(`/documents/${encodeURIComponent(id)}/fields`),
     refetchInterval: (query) =>
       query.state.data?.document.outcome === "processing" ? POLL_MS : false,
+  });
+}
+
+/**
+ * Correct and/or approve a document. The answer is the document as it now
+ * is, so the page shows it at once; the list and summary are refetched,
+ * since its status, supplier or total may have changed.
+ */
+export function useSaveFields(id: string) {
+  const queries = useQueryClient();
+  return useMutation({
+    mutationFn: (patch: FieldsPatch) =>
+      sendJson<DocumentFields>("PATCH", `/documents/${encodeURIComponent(id)}/fields`, patch),
+    onSuccess: (view) => {
+      queries.setQueryData(["documents", "one", id], view);
+      void queries.invalidateQueries({
+        queryKey: ["documents"],
+        predicate: (query) => query.queryKey[1] !== "one",
+      });
+    },
   });
 }

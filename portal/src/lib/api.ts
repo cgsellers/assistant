@@ -28,6 +28,11 @@ export function setCsrfToken(token: string | null) {
   csrfToken = token;
 }
 
+/** The header that proves a change comes from this page, for requests made outside `api`. */
+export function csrfHeaders(): Record<string, string> {
+  return csrfToken ? { "X-CSRF-Token": csrfToken } : {};
+}
+
 const SAFE = new Set(["GET", "HEAD", "OPTIONS"]);
 
 const csrf: Middleware = {
@@ -45,11 +50,14 @@ api.use(csrf);
 export class ApiError extends Error {
   readonly status: number;
   readonly detail: string;
+  /** For a 422: what was wrong with each field, by name. */
+  readonly fields: Record<string, string>;
 
-  constructor(status: number, detail: string) {
+  constructor(status: number, detail: string, fields: Record<string, string> = {}) {
     super(detail);
     this.status = status;
     this.detail = detail;
+    this.fields = fields;
   }
 }
 

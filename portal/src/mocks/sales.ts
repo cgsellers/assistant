@@ -1,4 +1,12 @@
-import type { DocumentRow, Field, FieldValue, ListField, ScalarField } from "@/api/contract";
+import type {
+  DocumentRow,
+  Field,
+  FieldValue,
+  ListField,
+  ListRow,
+  Location,
+  ScalarField,
+} from "@/api/contract";
 import { amountFor, SUPPLIERS as ROSTER } from "./documents";
 
 /**
@@ -241,25 +249,61 @@ export function saleFor(row: DocumentRow): Sale {
 // --- What was read --------------------------------------------------------------
 
 const cents = (value: number) => (value / 100).toFixed(2);
+const toCents = (value: FieldValue) => Math.round(Number(value) * 100);
+
+/** Where each value was printed, by field key; see files.ts. */
+type Where = Map<string, Location>;
 
 function scalar(
+  where: Where,
   name: string,
   label: string,
   type: ScalarField["type"],
   value: FieldValue,
   extra: Partial<ScalarField> = {},
 ): ScalarField {
-  return { name, label, type, value, derived: false, problem: null, ...extra };
-}
-
-function lineItems(sale: Sale, receipt: boolean): ListField {
   return {
-    name: "line_items",
-    label: "Line items",
-    type: "list",
+    name,
+    label,
+    type,
+    value,
+    required: false,
     derived: false,
     problem: null,
-    columns: receipt
+    corrected: null,
+    location: value === null ? null : (where.get(name) ?? null),
+    ...extra,
+  };
+}
+
+function list(
+  where: Where,
+  name: string,
+  label: string,
+  columns: ListField["columns"],
+  rows: ListRow[],
+): ListField {
+  return {
+    name,
+    label,
+    type: "list",
+    required: false,
+    derived: false,
+    problem: null,
+    corrected: null,
+    columns,
+    rows,
+    row_locations: rows.map((_, i) => where.get(`${name}.${i}`) ?? null),
+  };
+}
+
+function lineItems(where: Where, sale: Sale): ListField {
+  const receipt = sale.kind === "receipt";
+  return list(
+    where,
+    "line_items",
+    "Line items",
+    receipt
       ? [
           { name: "name", label: "Name", type: "string" },
           { name: "quantity", label: "Quantity", type: "number" },
@@ -271,8 +315,8 @@ function lineItems(sale: Sale, receipt: boolean): ListField {
           { name: "unit_price", label: "Unit price", type: "money" },
           { name: "amount", label: "Amount", type: "money" },
         ],
-    rows: sale.lines.map(
-      (line): Record<string, FieldValue> =>
+    sale.lines.map(
+      (line): ListRow =>
         receipt
           ? { name: line.description, quantity: line.quantity, amount: cents(line.amount) }
           : {
@@ -282,84 +326,135 @@ function lineItems(sale: Sale, receipt: boolean): ListField {
               amount: cents(line.amount),
             },
     ),
-  };
+  );
 }
 
-/** The fields a processor read from `sale`, and what holds it in review. */
-export function readFrom(sale: Sale): { fields: Field[]; problems: string[] } {
+/**
+ * The fields a processor read from `sale`, as read: before the transform and
+ * the rules (see `check`), and before anyone corrected them.
+ */
+export function readFrom(sale: Sale, where: Where): Field[] {
   const cutOff = sale.variant === "cut_off";
-  const totalProblem = cutOff ? "No total could be read: the document ends before it." : null;
-  const problems =
-    sale.variant === "lines_disagree"
-      ? [
-          `The line items add up to ${cents(sale.lines.reduce((a, l) => a + l.amount, 0))}, but the ${
-            sale.kind === "invoice" ? "subtotal" : "total"
-          } says ${cents(sale.kind === "invoice" ? sale.subtotal : sale.total)}.`,
-        ]
-      : [];
+  const required = { required: true };
 
   if (sale.kind === "receipt") {
-    return {
-      problems,
-      fields: [
-        scalar("vendor", "Vendor", "string", sale.supplier),
-        scalar("tax_id", "Tax ID", "string", sale.details.taxId),
-        scalar("issued_on", "Issued on", "date", sale.issued),
-        scalar("subtotal", "Subtotal", "money", cutOff ? null : cents(sale.subtotal)),
-        scalar("tax_amount", "Tax amount", "money", cutOff ? null : cents(sale.tax)),
-        scalar("total", "Total", "money", cutOff ? null : cents(sale.total), {
-          problem: totalProblem,
-        }),
-        scalar("currency", "Currency", "string", sale.currency),
-        scalar(
-          "payment_method",
-          "Payment method",
-          "string",
-          cutOff ? null : (sale.details.payment ?? null),
-        ),
-        lineItems(sale, true),
-      ],
-    };
+    return [
+      scalar(where, "vendor", "Vendor", "string", sale.supplier, required),
+      scalar(where, "tax_id", "Tax ID", "string", sale.details.taxId),
+      scalar(where, "issued_on", "Issued on", "date", sale.issued, required),
+      scalar(where, "subtotal", "Subtotal", "money", cutOff ? null : cents(sale.subtotal)),
+      scalar(where, "tax_amount", "Tax amount", "money", cutOff ? null : cents(sale.tax)),
+      scalar(where, "total", "Total", "money", cutOff ? null : cents(sale.total), required),
+      scalar(where, "currency", "Currency", "string", sale.currency),
+      scalar(
+        where,
+        "payment_method",
+        "Payment method",
+        "string",
+        cutOff ? null : (sale.details.payment ?? null),
+      ),
+      lineItems(where, sale),
+    ];
   }
 
-  const taxes: ListField = {
-    name: "taxes",
-    label: "Taxes",
-    type: "list",
-    derived: false,
-    problem: null,
-    columns: [
-      { name: "name", label: "Name", type: "string" },
-      { name: "rate", label: "Rate", type: "string" },
-      { name: "amount", label: "Amount", type: "money" },
-    ],
-    rows: cutOff
-      ? []
-      : [{ name: sale.details.taxName, rate: `${sale.details.taxRate}%`, amount: cents(sale.tax) }],
+  return [
+    scalar(where, "invoice_number", "Invoice number", "string", sale.number, required),
+    scalar(where, "issued_on", "Issued on", "date", sale.issued, required),
+    scalar(where, "due_date", "Due date", "date", sale.due),
+    scalar(where, "po_number", "PO number", "string", sale.po),
+    scalar(where, "vendor", "Vendor", "string", sale.supplier, required),
+    scalar(where, "vendor_tax_id", "Vendor tax ID", "string", sale.details.taxId),
+    scalar(where, "bill_to", "Bill to", "string", BILL_TO.join(", ")),
+    scalar(where, "currency", "Currency", "string", sale.currency),
+    scalar(where, "subtotal", "Subtotal", "money", cutOff ? null : cents(sale.subtotal)),
+    scalar(where, "discount", "Discount", "money", null),
+    scalar(where, "tax_amount", "Tax amount", "money", cutOff ? null : cents(sale.tax)),
+    list(
+      where,
+      "taxes",
+      "Taxes",
+      [
+        { name: "name", label: "Name", type: "string" },
+        { name: "rate", label: "Rate", type: "string" },
+        { name: "amount", label: "Amount", type: "money" },
+      ],
+      cutOff
+        ? []
+        : [
+            {
+              name: sale.details.taxName,
+              rate: `${sale.details.taxRate}%`,
+              amount: cents(sale.tax),
+            },
+          ],
+    ),
+    // The invoice processor's transform fills a total the page did not print.
+    scalar(
+      where,
+      "total",
+      "Total",
+      "money",
+      sale.variant === "cut_off" || sale.variant === "no_total_printed" ? null : cents(sale.total),
+      required,
+    ),
+    lineItems(where, sale),
+  ];
+}
+
+/**
+ * What the backend does after every read and every correction: the
+ * processor's transform, then its rules. Stands in for doctypes/transform.py
+ * and doctypes/validate.py, with the invoice and receipt processors' rules.
+ */
+export function check(kind: Sale["kind"], read: Field[]): { fields: Field[]; problems: string[] } {
+  const fields = read.map((field) => ({ ...field, problem: null }) as Field);
+  const byName = (name: string) => fields.find((f) => f.name === name);
+  const value = (name: string) => {
+    const field = byName(name);
+    return field && field.type !== "list" ? field.value : null;
   };
-  return {
-    problems,
-    fields: [
-      scalar("invoice_number", "Invoice number", "string", sale.number),
-      scalar("issued_on", "Issued on", "date", sale.issued),
-      scalar("due_date", "Due date", "date", sale.due, {
-        problem:
-          sale.variant === "dates_disagree" ? "The due date is before the invoice date." : null,
-      }),
-      scalar("po_number", "PO number", "string", sale.po),
-      scalar("vendor", "Vendor", "string", sale.supplier),
-      scalar("vendor_tax_id", "Vendor tax ID", "string", sale.details.taxId),
-      scalar("bill_to", "Bill to", "string", BILL_TO.join(", ")),
-      scalar("currency", "Currency", "string", sale.currency),
-      scalar("subtotal", "Subtotal", "money", cutOff ? null : cents(sale.subtotal)),
-      scalar("discount", "Discount", "money", null),
-      scalar("tax_amount", "Tax amount", "money", cutOff ? null : cents(sale.tax)),
-      taxes,
-      scalar("total", "Total", "money", cutOff ? null : cents(sale.total), {
-        derived: sale.variant === "no_total_printed",
-        problem: totalProblem,
-      }),
-      lineItems(sale, false),
-    ],
-  };
+  const problems: string[] = [];
+
+  // The transform: an invoice with no printed total gets subtotal - discount + tax.
+  const total = byName("total");
+  if (kind === "invoice" && total && total.type !== "list") {
+    const worked = total.derived && !total.corrected;
+    if (total.value === null || worked) {
+      const subtotal = value("subtotal");
+      const tax = value("tax_amount");
+      const figured = subtotal !== null && tax !== null;
+      total.value = figured
+        ? cents(toCents(subtotal) - toCents(value("discount")) + toCents(tax))
+        : null;
+      total.derived = figured;
+      if (figured) total.location = null;
+    }
+  }
+
+  for (const field of fields) {
+    if (field.required && field.type !== "list" && (field.value === null || field.value === "")) {
+      field.problem =
+        field.name === "total"
+          ? "No total could be read from the document."
+          : "Required, but not found on the document.";
+    }
+  }
+
+  const due = value("due_date");
+  const issued = value("issued_on");
+  const dueField = byName("due_date");
+  if (dueField && due && issued && String(due) < String(issued)) {
+    dueField.problem = "The due date is before the invoice date.";
+  }
+
+  const items = byName("line_items");
+  const against = kind === "invoice" ? "subtotal" : "total";
+  const expected = value(against);
+  if (items?.type === "list" && items.rows.length && expected !== null) {
+    const sum = items.rows.reduce((a, row) => a + toCents(row.amount ?? 0), 0);
+    if (sum !== toCents(expected)) {
+      problems.push(`The line items add up to ${cents(sum)}, but the ${against} says ${expected}.`);
+    }
+  }
+  return { fields, problems };
 }
