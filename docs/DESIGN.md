@@ -2282,6 +2282,48 @@ matched the contract exactly.
   the rebuilt container with a sideways photo carrying orientation 6: the page came
   back portrait and the total where it was drawn.
 
+**Backend 3: corrections.** `PATCH /documents/{id}/fields` is built (`doctypes/review.py`).
+With it, everything the document page and the list need is real, and `contract.ts` holds
+only the settings endpoints.
+- **A correction is a new extraction, not an edit.** The values sent are laid over what
+  the model read, and the document goes through its processor again with the worker's
+  own `process()`: coercion, transform, rules. The result becomes the current
+  extraction, attributed to `correction`, so everything that reads the current
+  extraction follows on its own: the list columns, the page, `/result` (an ERP gets the
+  corrected values) and the ledger. Because they are laid over the *reading*, a
+  corrected subtotal makes the transform work the total out again, while a total typed
+  in stays as typed.
+- **Then the document moves on as the rules say.** Ready means into the ledger, with a
+  row that supersedes the old one. Problems left means still in review, unless the
+  person approves it as it is: then it goes into the ledger with its problems on
+  record. An approval covers the values approved; the next correction checks again
+  from scratch. A committed document corrected into a state that fails its rules has
+  its ledger row **withdrawn**, so the ledger never holds a figure its own client has
+  disputed.
+- **Who, what, from what.** A `corrections` row per save, with the person, the changes
+  as `{field: {was, now}}`, and whether they approved. It's a client table, so it gets
+  all three tenancy layers. The page shows each corrected field's original reading
+  even after several corrections. These rows are also the labels step 7's evals will
+  learn from.
+- **No lost updates.** Each document carries a `revision`. A save names the revision it
+  was made against, under a row lock (`FOR UPDATE` on Postgres), and a stale one is
+  refused with 409, changing nothing.
+- **Refusals say what and where.** 422 comes with `{field: reason}`, checked against the
+  processor version that read the document. 409 also covers a document not yet read.
+- **Another client's document looks missing, whatever is sent.** The route finds the
+  document before it reads the body. The route test has a new kind,
+  `client_document_write`, which sends a well-formed change from another client (404,
+  byte for byte the same as a missing document), and one from staff (which gets
+  through). A signed-in browser must send its CSRF token.
+- **Every client table is now checked against the database.** A test reads
+  `CLIENT_DATA` and the Postgres catalogue, and fails on any client table without RLS
+  forced and the isolation policy, so a table added later cannot be forgotten.
+- Found on the way: on a field, `required` only shapes the model's JSON schema. Absence
+  belongs to the `required` *rule*, by design (`validate.py`), which is why the seeded
+  receipt and invoice both have one for their total.
+- Not yet: client roles. A viewer must not correct, but the roles arrive with the
+  settings backend; until then, anyone signed in at the organisation may correct.
+
 ### 9.2 Why Postgres
 
 SQLite was right for getting started: nothing to run, and a suite of several hundred

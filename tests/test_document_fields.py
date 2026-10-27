@@ -45,6 +45,8 @@ RECEIPT = {
         },
     },
     "rules": [
+        # As the seeded receipt has: only a `required` rule owns absence.
+        {"type": "required", "field": "total"},
         {"type": "positive", "field": "total"},
         {"type": "required", "field": "vendor", "message": "Every receipt names its shop."},
     ],

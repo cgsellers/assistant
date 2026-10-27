@@ -133,3 +133,36 @@ def test_the_application_role_cannot_rewrite_history_or_the_schema(db_engine):
             with pytest.raises(DBAPIError):
                 connection.execute(text(statement))
             connection.rollback()
+
+
+def test_every_client_table_is_locked(db_engine):
+    """
+    Every table in CLIENT_DATA has RLS enabled, forced on its owner too, and the
+    tenant_isolation policy. Read from the catalogue rather than listed here,
+    so a client table added later without its policy fails this test.
+    """
+    from core.scoping import CLIENT_DATA
+
+    tables = sorted(model.__tablename__ for model in CLIENT_DATA)
+    with db_engine.connect() as connection:
+        locked = dict(
+            connection.execute(
+                text(
+                    "SELECT c.relname, c.relrowsecurity AND c.relforcerowsecurity "
+                    "FROM pg_class c WHERE c.relname = ANY(:tables)"
+                ),
+                {"tables": tables},
+            ).all()
+        )
+        with_policy = set(
+            connection.execute(
+                text(
+                    "SELECT tablename FROM pg_policies "
+                    "WHERE policyname = 'tenant_isolation' AND tablename = ANY(:tables)"
+                ),
+                {"tables": tables},
+            ).scalars()
+        )
+    assert "corrections" in tables
+    assert {t: locked.get(t) for t in tables} == dict.fromkeys(tables, True)
+    assert with_policy == set(tables)

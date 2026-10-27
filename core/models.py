@@ -207,6 +207,9 @@ class Document(Base):
     document_date: Mapped[date | None] = mapped_column(Date)
     total_amount: Mapped[Decimal | None] = mapped_column(Money(14, 4))
     total_currency: Mapped[str | None] = mapped_column(String(3))
+    #: Goes up with every correction. A correction names the revision it was
+    #: made against and is refused if another landed first (doctypes.review).
+    revision: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
 
     ocr_result: Mapped[OcrResult | None] = relationship(
         back_populates="document", uselist=False
@@ -702,7 +705,36 @@ class UserSession(Base):
 
 # --- Tenancy: rows that follow their document ---------------------------------
 
-_FOLLOWS_DOCUMENT = (OcrResult, DocumentEvent, Job, Extraction, Transaction)
+class Correction(Base):
+    """
+    Values a person changed on a document, or their approval of it as it is
+    (doctypes.review). One row per save: what changed, from what, by whom.
+    The values themselves live on the extraction the save produced; this is
+    the record of who did it -- the audit trail, and in step 7 the labels the
+    evals learn from.
+    """
+
+    __tablename__ = "corrections"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    document_id: Mapped[str] = mapped_column(ForeignKey("documents.id"), index=True)
+    #: The document's organisation, copied by `_follow_the_document`.
+    organisation_id: Mapped[str] = mapped_column(ForeignKey("organisations.id"), index=True)
+    #: The extraction the corrected values became; the one current at the time
+    #: for an approval that changed nothing.
+    extraction_id: Mapped[str] = mapped_column(ForeignKey("extractions.id"))
+    #: The document's revision after this save.
+    revision: Mapped[int] = mapped_column(Integer)
+    #: Who: a user's email or a key's name.
+    by: Mapped[str] = mapped_column(String(200))
+    #: {field: {"was": value before, "now": value after}}, in wire form.
+    changes: Mapped[dict] = mapped_column(JsonType)
+    #: Accepted with its problems, as it is.
+    approved: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+
+_FOLLOWS_DOCUMENT = (OcrResult, DocumentEvent, Job, Extraction, Transaction, Correction)
 
 
 @event.listens_for(Session, "before_flush")

@@ -911,6 +911,103 @@
         "title": "FieldsDocumentOut",
         "type": "object"
       },
+      "FieldsPatchIn": {
+        "additionalProperties": false,
+        "description": "PATCH /documents/{id}/fields: correct values, approve, or both.",
+        "properties": {
+          "approve": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approve"
+          },
+          "revision": {
+            "minimum": 1.0,
+            "title": "Revision",
+            "type": "integer"
+          },
+          "values": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "boolean"
+                },
+                {
+                  "items": {
+                    "additionalProperties": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "integer"
+                        },
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "type": "object"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Values",
+            "type": "object"
+          }
+        },
+        "required": [
+          "revision",
+          "values"
+        ],
+        "title": "FieldsPatchIn",
+        "type": "object"
+      },
+      "FieldsRefusedOut": {
+        "description": "Why a correction was refused, and for a 422, what was wrong with each field.",
+        "properties": {
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "fields": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Fields",
+            "type": "object"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "FieldsRefusedOut",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -2936,6 +3033,74 @@
           }
         },
         "summary": "Get a document's fields, for a person to read",
+        "tags": [
+          "documents"
+        ]
+      },
+      "patch": {
+        "description": "Correct values read from a document, approve it with its problems, or both.\n\nThe values are laid over what was read and the document goes through its\nprocessor again: the transform works out what it worked out before, the\nrules run, and the document is ready -- and in the ledger -- or still in\nreview, unless approved. `/result` gives the corrected values from then on.\n\nSend the `revision` the change was made against. If someone saved in\nbetween, the answer is 409 and nothing changes: load the document again.",
+        "operationId": "correct_fields_documents__document_id__fields_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "title": "Document Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/FieldsPatchIn"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Patch"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentFieldsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FieldsRefusedOut"
+                }
+              }
+            },
+            "description": "Changed since, or not read yet"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FieldsRefusedOut"
+                }
+              }
+            },
+            "description": "Values that do not fit their fields"
+          }
+        },
+        "summary": "Correct a document's fields, or approve it as it is",
         "tags": [
           "documents"
         ]

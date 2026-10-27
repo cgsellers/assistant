@@ -342,6 +342,37 @@ def record_transaction(
     return transaction
 
 
+def record_transition(
+    session: Session, document: Document, to_status: str, detail: dict | None = None
+) -> None:
+    """Move a document to `to_status`, with the event that says so. Not committed."""
+    session.add(
+        DocumentEvent(
+            document_id=document.id,
+            from_status=document.status,
+            to_status=to_status,
+            detail=detail,
+        )
+    )
+    document.status = to_status
+
+
+def withdraw_transaction(session: Session, document_id: str) -> bool:
+    """
+    Take a document's ledger row out of the ledger, keeping it as history.
+
+    For a document that no longer stands behind its figures -- corrected into
+    a state that fails its rules -- so the ledger never holds a number its own
+    client has since disputed. Not committed. True if there was a row.
+    """
+    result = session.execute(
+        update(Transaction)
+        .where(Transaction.document_id == document_id, Transaction.is_current.is_(True))
+        .values(is_current=False)
+    )
+    return bool(result.rowcount)
+
+
 def current_extraction(session: Session, document_id: str) -> Extraction | None:
     """The extraction that counts for this document: never a trial, never a failed attempt."""
     return session.scalar(

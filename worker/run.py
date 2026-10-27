@@ -26,14 +26,12 @@ from sqlalchemy.orm import Session
 
 from core import money, repository, storage
 from core.db import SessionLocal
-from core.models import Document, DocumentEvent, Job, OcrResult, utcnow
+from core.models import Document, Job, OcrResult, utcnow
 from core.scoping import Scope, set_scope
 from core.status import DocStatus, JobKind, JobStatus
-from doctypes import listing, registry
-from doctypes.canonical import derived_columns, to_ledger
-from doctypes.definition import Definition
+from doctypes import ledger, listing, registry
 from doctypes.schema import build_json_schema
-from doctypes.transform import Processed, process
+from doctypes.transform import process
 from llm import get_extractor
 from llm.base import ExtractionError, ExtractionRefused, Extractor
 from ocr import get_engine
@@ -125,20 +123,6 @@ def reclaim_stale(session: Session) -> int:
     return result.rowcount
 
 
-def _record_transition(
-    session: Session, document: Document, to_status: str, detail: dict | None = None
-) -> None:
-    session.add(
-        DocumentEvent(
-            document_id=document.id,
-            from_status=document.status,
-            to_status=to_status,
-            detail=detail,
-        )
-    )
-    document.status = to_status
-
-
 def run_ocr_job(session: Session, job: Job, engine: OcrEngine) -> None:
     """Process one claimed OCR job. Commits its own outcome."""
     document = session.get(Document, job.document_id)
@@ -173,7 +157,7 @@ def run_ocr_job(session: Session, job: Job, engine: OcrEngine) -> None:
             mean_confidence=output.mean_confidence,
         )
     )
-    _record_transition(
+    repository.record_transition(
         session,
         document,
         DocStatus.OCR_DONE,
@@ -216,7 +200,7 @@ def _fail_permanently(
     """
     job.status = JobStatus.FAILED
     job.last_error = reason
-    _record_transition(session, document, status, {"reason": reason, "kind": kind})
+    repository.record_transition(session, document, status, {"reason": reason, "kind": kind})
     session.commit()
     log.warning(
         "%s failed permanently document=%s %s", job.kind, document.id[:8], reason
@@ -285,7 +269,7 @@ def run_extract_job(session: Session, job: Job, extractor: Extractor) -> None:
         # is nothing to extract against. A model classifier for this case is
         # phase 4; until then the document stops here rather than being
         # extracted against a guess. The job did its work, so it is done.
-        _record_transition(
+        repository.record_transition(
             session, document, DocStatus.UNSUPPORTED,
             {"reason": "no document type matched", "chars": len(text), "scores": evidence},
         )
@@ -299,7 +283,7 @@ def run_extract_job(session: Session, job: Job, extractor: Extractor) -> None:
     # Recorded before the model call, so a document that dies mid-extraction
     # still shows what it was routed to and how confidently. On a retry this
     # logs a second classified event, which is honest: routing did run twice.
-    _record_transition(
+    repository.record_transition(
         session, document, DocStatus.CLASSIFIED,
         {
             "doc_type": definition.name,
@@ -373,7 +357,7 @@ def run_extract_job(session: Session, job: Job, extractor: Extractor) -> None:
     # they send to review.
     listing.summarise(document, definition, processed.data)
 
-    _record_transition(
+    repository.record_transition(
         session, document, DocStatus.EXTRACTED,
         {
             "model": result.model,
@@ -387,7 +371,7 @@ def run_extract_job(session: Session, job: Job, extractor: Extractor) -> None:
     # model answered" from "the answer survived the rules", and phase 4 slots
     # the vision escalation between them.
     if errors:
-        _record_transition(
+        repository.record_transition(
             session, document, DocStatus.NEEDS_REVIEW, {"validation_errors": errors}
         )
         job.status = JobStatus.DONE
@@ -400,10 +384,10 @@ def run_extract_job(session: Session, job: Job, extractor: Extractor) -> None:
         )
         return
 
-    _record_transition(session, document, DocStatus.VALIDATED, None)
+    repository.record_transition(session, document, DocStatus.VALIDATED, None)
     session.commit()
 
-    _commit_to_ledger(session, document, definition, extraction, processed)
+    ledger.commit(session, document, definition, extraction, processed)
 
     job.status = JobStatus.DONE
     job.last_error = None
@@ -412,44 +396,6 @@ def run_extract_job(session: Session, job: Job, extractor: Extractor) -> None:
         "extract done document=%s type=%s v%d status=%s cost=$%s",
         document.id[:8], definition.name, definition.version, document.status,
         result.cost_usd,
-    )
-
-
-def _commit_to_ledger(
-    session: Session,
-    document: Document,
-    definition: Definition,
-    extraction,
-    processed: Processed,
-) -> None:
-    """
-    Write the canonical row, or record why the document stops at `validated`.
-
-    Not every validated document reaches the ledger, and that is not a
-    failure: a document type with no `canonical` mapping is one an analyst is
-    still shaping. Stopping with the reason in the audit trail is more useful
-    than inventing a row or failing the job.
-    """
-    values, reason = to_ledger(definition, processed.data)
-    if values is None:
-        log.info("document=%s stays validated: %s", document.id[:8], reason)
-        return
-    values["derived_fields"] = derived_columns(definition, processed.data, processed.derived)
-
-    transaction = repository.record_transaction(
-        session, extraction=extraction, values=values
-    )
-    _record_transition(
-        session,
-        document,
-        DocStatus.COMMITTED,
-        {
-            "transaction_id": transaction.id,
-            "amount": money.to_str(transaction.amount),
-            "currency": transaction.currency,
-            "direction": transaction.direction,
-            "derived": transaction.derived_fields,
-        },
     )
 
 

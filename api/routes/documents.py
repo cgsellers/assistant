@@ -9,7 +9,18 @@ from typing import Literal
 from urllib.parse import quote
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Body,
+    Depends,
+    File,
+    HTTPException,
+    Query,
+    Response,
+    UploadFile,
+    status,
+)
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from api.schemas import (
@@ -20,6 +31,8 @@ from api.schemas import (
     DocumentListOut,
     DocumentOut,
     DocumentSummaryOut,
+    FieldsPatchIn,
+    FieldsRefusedOut,
     OcrResultOut,
     ResultOut,
 )
@@ -27,7 +40,7 @@ from core import repository, storage, tenancy
 from core.auth import Principal, require_principal
 from core.config import get_settings
 from core.db import get_session
-from doctypes import listing
+from doctypes import listing, review
 from doctypes.fields import document_fields
 from doctypes.results import document_result
 
@@ -348,6 +361,63 @@ def get_fields(document_id: str, session: Session = Depends(get_session)) -> Doc
     if document is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No such document")
     return DocumentFieldsOut.model_validate(document_fields(session, document))
+
+
+@router.patch(
+    "/{document_id}/fields",
+    response_model=DocumentFieldsOut,
+    summary="Correct a document's fields, or approve it as it is",
+    responses={
+        409: {"model": FieldsRefusedOut, "description": "Changed since, or not read yet"},
+        422: {"model": FieldsRefusedOut, "description": "Values that do not fit their fields"},
+    },
+)
+def correct_fields(
+    document_id: str,
+    patch: FieldsPatchIn | None = Body(default=None),
+    principal: Principal | None = Depends(require_principal),
+    session: Session = Depends(get_session),
+) -> DocumentFieldsOut | JSONResponse:
+    """
+    Correct values read from a document, approve it with its problems, or both.
+
+    The values are laid over what was read and the document goes through its
+    processor again: the transform works out what it worked out before, the
+    rules run, and the document is ready -- and in the ledger -- or still in
+    review, unless approved. `/result` gives the corrected values from then on.
+
+    Send the `revision` the change was made against. If someone saved in
+    between, the answer is 409 and nothing changes: load the document again.
+    """
+    document = repository.get_document(session, document_id)
+    # Before the body is looked at, so another client's document answers
+    # exactly as a missing one, whatever was sent.
+    if document is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No such document")
+    if patch is None:
+        return _refused(422, "Send the revision and the values to change.")
+    try:
+        review.correct(
+            session,
+            document,
+            revision=patch.revision,
+            values=patch.values,
+            approve=bool(patch.approve),
+            by=principal.name if principal else "local",
+        )
+    except review.NothingRead:
+        return _refused(409, "Nothing has been read from this document yet.")
+    except review.Stale:
+        return _refused(409, "Someone else changed this document since you opened it.")
+    except review.Refused as exc:
+        return _refused(422, str(exc), exc.fields)
+    return DocumentFieldsOut.model_validate(document_fields(session, document))
+
+
+def _refused(code: int, detail: str, fields: dict[str, str] | None = None) -> JSONResponse:
+    return JSONResponse(
+        FieldsRefusedOut(detail=detail, fields=fields or {}).model_dump(), status_code=code
+    )
 
 
 @router.get(

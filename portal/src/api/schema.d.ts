@@ -235,7 +235,19 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Correct a document's fields, or approve it as it is
+         * @description Correct values read from a document, approve it with its problems, or both.
+         *
+         *     The values are laid over what was read and the document goes through its
+         *     processor again: the transform works out what it worked out before, the
+         *     rules run, and the document is ready -- and in the ledger -- or still in
+         *     review, unless approved. `/result` gives the corrected values from then on.
+         *
+         *     Send the `revision` the change was made against. If someone saved in
+         *     between, the answer is 409 and nothing changes: load the document again.
+         */
+        patch: operations["correct_fields_documents__document_id__fields_patch"];
         trace?: never;
     };
     "/documents/{document_id}/file": {
@@ -869,6 +881,34 @@ export interface components {
             supplier: string | null;
             total: components["schemas"]["MoneyOut"] | null;
             type: components["schemas"]["DocTypeOut"] | null;
+        };
+        /**
+         * FieldsPatchIn
+         * @description PATCH /documents/{id}/fields: correct values, approve, or both.
+         */
+        FieldsPatchIn: {
+            /** Approve */
+            approve?: boolean | null;
+            /** Revision */
+            revision: number;
+            /** Values */
+            values: {
+                [key: string]: string | number | boolean | {
+                    [key: string]: string | number | boolean | null;
+                }[] | null;
+            };
+        };
+        /**
+         * FieldsRefusedOut
+         * @description Why a correction was refused, and for a 422, what was wrong with each field.
+         */
+        FieldsRefusedOut: {
+            /** Detail */
+            detail: string;
+            /** Fields */
+            fields?: {
+                [key: string]: string;
+            };
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -1628,6 +1668,50 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    correct_fields_documents__document_id__fields_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["FieldsPatchIn"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentFieldsOut"];
+                };
+            };
+            /** @description Changed since, or not read yet */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FieldsRefusedOut"];
+                };
+            };
+            /** @description Values that do not fit their fields */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FieldsRefusedOut"];
                 };
             };
         };

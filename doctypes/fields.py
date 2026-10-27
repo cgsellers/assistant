@@ -15,10 +15,11 @@ import re
 from typing import Any
 
 from pydantic import ValidationError
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from core import repository
-from core.models import Document, Extraction
+from core.models import Correction, Document, Extraction
 from core.status import DocStatus
 from doctypes import listing
 from doctypes.definition import Definition, FieldSpec, FieldType, RequiredRule
@@ -110,6 +111,63 @@ def _history(document: Document, labels: dict[str, str]) -> list[dict[str, Any]]
     return entries
 
 
+def _corrections(session: Session, document: Document) -> list[Correction]:
+    return list(
+        session.scalars(
+            select(Correction)
+            .where(Correction.document_id == document.id)
+            .order_by(Correction.revision)
+        )
+    )
+
+
+def _corrected(corrections: list[Correction]) -> dict[str, dict[str, Any]]:
+    """
+    Who last changed each field, and what was read before anyone did: the
+    first correction's "was", since later ones only record the one before.
+    """
+    corrected: dict[str, dict[str, Any]] = {}
+    for correction in corrections:
+        for name, change in (correction.changes or {}).items():
+            was = corrected[name]["was"] if name in corrected else change.get("was")
+            corrected[name] = {"by": correction.by, "at": correction.created_at, "was": was}
+    return corrected
+
+
+def _correction_history(
+    corrections: list[Correction], definition: Definition | None
+) -> list[dict[str, Any]]:
+    entries = []
+    for correction in corrections:
+        names = list(correction.changes or {})
+        if names:
+            labels = ", ".join(
+                label(n) if definition and n in definition.fields else n for n in names
+            )
+            entries.append(
+                {"at": correction.created_at, "what": f"Corrected {labels}", "by": correction.by}
+            )
+        if correction.approved:
+            entries.append(
+                {"at": correction.created_at, "what": "Approved as it is", "by": correction.by}
+            )
+    return entries
+
+
+def _read_at(session: Session, document: Document):
+    """When the model last read it: corrections are extractions too, but nobody read anything."""
+    return session.scalar(
+        select(Extraction.created_at)
+        .where(
+            Extraction.document_id == document.id,
+            Extraction.is_trial.is_(False),
+            Extraction.model_used != "correction",
+        )
+        .order_by(Extraction.created_at.desc())
+        .limit(1)
+    )
+
+
 def _definition(session: Session, extraction: Extraction) -> Definition | None:
     """The processor version that read it -- not the live one, which may differ by now."""
     row = repository.get_document_type_version(
@@ -140,13 +198,15 @@ def document_fields(session: Session, document: Document) -> dict[str, Any]:
         "fields": [],
         "problems": [],
         "read_at": None,
-        "revision": 1,
+        "revision": document.revision,
         "history": _history(document, labels),
     }
     if extraction is None or definition is None:
         return unread
 
     data = normalised_data(session, extraction) or {}
+    corrections = _corrections(session, document)
+    corrected = _corrected(corrections)
     derived = set(extraction.derived_fields or [])
     by_field, general = _problems(definition, list(extraction.validation_errors or []))
     ocr = repository.get_ocr_result(session, document.id)
@@ -162,7 +222,12 @@ def document_fields(session: Session, document: Document) -> dict[str, Any]:
             "required": _required(definition, name, spec),
             "derived": name in derived,
             "problem": by_field.get(name),
-            "corrected": None,
+            # A list's rows are replaced whole, so there is no one value it was.
+            "corrected": (
+                {**corrected[name], "was": None}
+                if name in corrected and spec.type is FieldType.LIST
+                else corrected.get(name)
+            ),
         }
         value = _value(spec, data.get(name))
         if spec.type is FieldType.LIST:
@@ -202,5 +267,9 @@ def document_fields(session: Session, document: Document) -> dict[str, Any]:
         "currency": currency if isinstance(currency, str) else document.total_currency,
         "fields": fields,
         "problems": general,
-        "read_at": extraction.created_at,
+        "read_at": _read_at(session, document) or extraction.created_at,
+        "history": sorted(
+            unread["history"] + _correction_history(corrections, definition),
+            key=lambda entry: entry["at"],
+        ),
     }

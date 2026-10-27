@@ -253,3 +253,23 @@ class DocumentFieldsOut(BaseModel):
     #: Goes up with every change; a correction names the one it was made against.
     revision: int
     history: list[HistoryEntryOut]
+
+
+class FieldsPatchIn(BaseModel):
+    """PATCH /documents/{id}/fields: correct values, approve, or both."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    #: The revision the change was made against: refused (409) if another landed first.
+    revision: int = Field(ge=1)
+    #: Only the fields that changed, `{}` for none. A list is sent whole.
+    values: dict[str, FieldValue | list[dict[str, FieldValue]]]
+    #: Accept the document as it is, problems and all. Absent means not approving.
+    approve: bool | None = None
+
+
+class FieldsRefusedOut(BaseModel):
+    """Why a correction was refused, and for a 422, what was wrong with each field."""
+
+    detail: str
+    fields: dict[str, str] = Field(default_factory=dict)

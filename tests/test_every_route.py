@@ -14,6 +14,8 @@ The kinds:
   self             the caller's own session -- needs credentials, nothing else
   upload           creates a document owned by the caller
   client_document  reads one document by id -- a client gets its own only
+  client_document_write
+                   changes one document by id -- likewise, whatever is sent
   client_listing   reads many -- a client sees nothing of anyone else's
   team             the processor API and the panel: the Ledgerline team only
   team_document    a panel page about one document: team only, and even a
@@ -60,6 +62,7 @@ ROUTES: dict[tuple[str, str], str] = {
     ("GET", "/documents/{document_id}/file"): "client_document",
     ("GET", "/documents/{document_id}/result"): "client_document",
     ("GET", "/documents/{document_id}/fields"): "client_document",
+    ("PATCH", "/documents/{document_id}/fields"): "client_document_write",
     ("GET", "/documents"): "client_listing",
     ("GET", "/documents/summary"): "client_listing",
     ("GET", "/documents/types"): "client_listing",
@@ -214,7 +217,11 @@ def test_public_routes_answer_without_credentials(world, anon_client, route):
 
 @pytest.mark.parametrize(
     "route",
-    _of("self") + _of("client_document") + _of("client_listing") + _of("upload"),
+    _of("self")
+    + _of("client_document")
+    + _of("client_document_write")
+    + _of("client_listing")
+    + _of("upload"),
     ids=_label,
 )
 def test_everything_else_needs_credentials(world, anon_client, route):
@@ -240,6 +247,31 @@ def test_staff_do_reach_it_so_the_404_is_isolation_not_breakage(world, route):
     browser, _ = _signed_in("ana@ledgerline.test")
     with browser:
         assert _call(browser, method, _path(path, world)).status_code == 200
+
+
+#: A well-formed change, so what answers is the document check, not the body's.
+CHANGE = {"revision": 1, "values": {}}
+
+
+@pytest.mark.parametrize("route", _of("client_document_write"), ids=_label)
+def test_another_clients_document_cannot_be_changed_and_looks_missing(world, route):
+    method, path = route
+    with _key(world["acme"]["key"]) as acme:
+        theirs = acme.request(method, _path(path, world), json=CHANGE)
+        missing = acme.request(
+            method, path.replace("{document_id}", "no-such-document"), json=CHANGE
+        )
+    assert theirs.status_code == 404
+    assert theirs.content == missing.content
+
+
+@pytest.mark.parametrize("route", _of("client_document_write"), ids=_label)
+def test_staff_do_reach_a_change_so_the_404_is_isolation(world, route):
+    method, path = route
+    browser, csrf = _signed_in("ana@ledgerline.test")
+    with browser:
+        response = browser.request(method, _path(path, world), json=CHANGE, headers=csrf)
+    assert response.status_code not in (401, 403, 404)
 
 
 @pytest.mark.parametrize("route", _of("client_listing"), ids=_label)

@@ -38,10 +38,20 @@ from sqlalchemy import Table, event
 from sqlalchemy.orm import ORMExecuteState, Session, with_loader_criteria
 from sqlalchemy.sql import visitors
 
-from core.models import Document, DocumentEvent, Extraction, Job, OcrResult, Transaction
+from core.models import (
+    Correction,
+    Document,
+    DocumentEvent,
+    Extraction,
+    Job,
+    OcrResult,
+    Transaction,
+)
 
 #: Every table holding a client's data. Each has organisation_id (4.1).
-CLIENT_DATA = (Document, OcrResult, DocumentEvent, Job, Extraction, Transaction)
+CLIENT_DATA = (
+    Document, OcrResult, DocumentEvent, Job, Extraction, Transaction, Correction,
+)  # fmt: skip
 
 _KEY = "ledgerline.scope"
 

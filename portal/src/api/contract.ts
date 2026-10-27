@@ -46,7 +46,7 @@ export interface DocumentQuery {
 }
 
 // --- Built: one document's fields ---------------------------------------------------
-// GET /documents/{id}/fields is in the API. Its PATCH, below, is not yet.
+// GET and PATCH /documents/{id}/fields are in the API.
 
 /** The value kinds a processor's fields can have (doctypes/definition.py FieldType). */
 export type FieldType = Schemas["ScalarFieldOut"]["type"];
@@ -67,30 +67,16 @@ export type Field = ScalarField | ListField;
 /** GET /documents/{id}/fields: one document as the portal shows it. */
 export type DocumentFields = Schemas["DocumentFieldsOut"];
 
-// --- Still to build ------------------------------------------------------------------
-
 /**
- * PATCH /documents/{id}/fields: correct values, approve, or both.
- *
- * The server re-runs the processor's transform and rules on the result.
- * With no problems left the document is done; with problems left it stays in
- * review unless `approve` says to accept it as it is. The answer is the
- * document's new DocumentFields.
- *
- * 409 when `revision` is not the current one; 422 when a value does not fit
- * its field, with `fields` saying which.
+ * PATCH /documents/{id}/fields: correct values, approve, or both. Answered
+ * with the document's new DocumentFields; 409 when `revision` is not the
+ * current one (or nothing has been read), 422 when a value does not fit its
+ * field, with `fields` saying which.
  */
-export interface FieldsPatch {
-  revision: number;
-  /** Only the fields that changed. A list is sent whole. */
-  values: Record<string, FieldValue | ListRow[]>;
-  approve?: boolean;
-}
+export type FieldsPatch = Schemas["FieldsPatchIn"];
+export type FieldsRefused = Schemas["FieldsRefusedOut"];
 
-export interface FieldsRefused {
-  detail: string;
-  fields?: Record<string, string>;
-}
+// --- Still to build ------------------------------------------------------------------
 
 // --- Settings: a client's API keys and team (5.6) -------------------------------------
 // All under /settings, for the signed-in person's own organisation only. Reading
