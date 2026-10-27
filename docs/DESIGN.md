@@ -2123,6 +2123,25 @@ Found on the way:
   first, then drawn and measured from the same layout, so a highlight lands on what was
   drawn. The boxes were checked by drawing them over a rendered invoice.
 
+**Found in Safari 26, after 5.4.** Every check had passed in jsdom and in a newer WebKit;
+the first real Safari found two things.
+- **PDFs crashed the page.** PDF.js builds the selectable text layer with
+  `for await (… of readableStream)`, and Safari 26 cannot iterate streams yet. The
+  standard behaviour is now installed where it is missing
+  (`viewer/stream-iteration.ts`), before PDF.js runs. Separately, a failure inside the
+  viewer is now contained: it shows the viewer's own "can't be shown, download it"
+  state, and the fields beside it keep working, rather than the error taking down the
+  whole page. Reproduced first by removing stream iteration from WebKit, then checked
+  fixed there.
+- **The mock API stopped answering, while appearing to run.** The mock's service worker
+  answers only for tabs it was told to mock, and lets everything else through. Safari
+  left the tab controlled by a worker that had never been told, so every request reached
+  the real API, which refused the demo login. In mock mode the app now checks at
+  startup that the mock really answers (`/api/__mock`, which only the mock knows), and
+  otherwise removes the stale worker and reloads once. The sign-in page shows that
+  check, a "Mock data" badge and a button that fills in the demo account, and the mock
+  session now survives a reload. None of it reaches a production build.
+
 ### 9.2 Why Postgres
 
 SQLite was right for getting started: nothing to run, and a suite of several hundred

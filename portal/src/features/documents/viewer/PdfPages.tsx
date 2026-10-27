@@ -1,3 +1,5 @@
+// Before PDF.js: Safari cannot yet iterate streams, which PDF.js relies on.
+import "./stream-iteration";
 import workerSrc from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { useState } from "react";
 import { Document, Page, pdfjs } from "react-pdf";

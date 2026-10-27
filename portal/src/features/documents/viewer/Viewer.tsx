@@ -1,10 +1,35 @@
 import { Download, ExternalLink, FileWarning, Maximize2, ZoomIn, ZoomOut } from "lucide-react";
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { Component, lazy, type ReactNode, Suspense, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { Highlight, type Pointing } from "./Highlight";
 
 const PdfPages = lazy(() => import("./PdfPages"));
+
+/**
+ * A failure inside the PDF viewer -- a damaged file, a browser missing
+ * something PDF.js needs -- becomes the viewer's own "can't be shown" state,
+ * rather than an error that takes the whole page and its fields with it.
+ */
+class Contained extends Component<
+  { onError: () => void; children: ReactNode },
+  { failed: boolean }
+> {
+  state = { failed: false };
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  componentDidCatch(error: Error) {
+    console.error("The document viewer failed:", error);
+    this.props.onError();
+  }
+
+  render() {
+    return this.state.failed ? null : this.props.children;
+  }
+}
 
 /** Zoom, as a multiple of fitting the panel's width. */
 const ZOOMS = [0.5, 0.75, 1, 1.25, 1.5, 2, 3];
@@ -120,7 +145,14 @@ export function Viewer({
               </div>
             }
           >
-            <PdfPages url={url} width={shown} pointing={pointing} onError={() => setFailed(true)} />
+            <Contained onError={() => setFailed(true)}>
+              <PdfPages
+                url={url}
+                width={shown}
+                pointing={pointing}
+                onError={() => setFailed(true)}
+              />
+            </Contained>
           </Suspense>
         ) : (
           <div className="relative mx-auto" style={{ width: shown }}>
