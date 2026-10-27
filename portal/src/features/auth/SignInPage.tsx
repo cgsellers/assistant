@@ -1,7 +1,7 @@
 import { type FormEvent, useState } from "react";
 import { Navigate, useNavigate, useSearchParams } from "react-router";
 import { Logo } from "@/components/logo";
-import { DEMO, MOCKS, MockBadge } from "@/components/mock-notice";
+import { DEMO, MOCKS, MockBadge, MockCheck } from "@/components/mock-notice";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -46,6 +46,7 @@ export function SignInPage() {
           {MOCKS && (
             <div className="mt-5 rounded-md border border-attention/25 bg-attention-soft/60 px-3 py-2.5 text-sm">
               <MockBadge />
+              <MockCheck />
               <p className="mt-1.5 text-ink-soft">
                 Demo account: <span className="font-medium">{DEMO.email}</span>, password{" "}
                 <span className="font-medium">{DEMO.password}</span>

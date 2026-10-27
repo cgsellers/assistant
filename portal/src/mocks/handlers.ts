@@ -23,6 +23,9 @@ export function setSignedIn(value: boolean) {
 }
 
 export const handlers = [
+  // Only the mock answers this: the sign-in page asks it to show whether the
+  // mock API is really answering in this tab, or requests reach the real one.
+  http.get("/api/__mock", () => HttpResponse.json({ mock: true })),
   ...documentHandlers,
   ...singleDocumentHandlers,
   http.get("/api/auth/me", () =>
