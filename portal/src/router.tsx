@@ -1,7 +1,6 @@
 import { createBrowserRouter, Navigate } from "react-router";
 import { RequireAuth } from "@/features/auth/RequireAuth";
 import { SignInPage } from "@/features/auth/SignInPage";
-import { Placeholder } from "@/features/placeholder";
 import { AppShell } from "@/layouts/AppShell";
 
 export const routes = [
@@ -31,7 +30,11 @@ export const routes = [
         lazy: () =>
           import("@/features/upload/UploadPage").then((m) => ({ Component: m.UploadPage })),
       },
-      { path: "settings", element: <Placeholder title="Settings" step="5.6" /> },
+      {
+        path: "settings",
+        lazy: () =>
+          import("@/features/settings/SettingsPage").then((m) => ({ Component: m.SettingsPage })),
+      },
     ],
   },
   { path: "*", element: <Navigate to="/documents" replace /> },

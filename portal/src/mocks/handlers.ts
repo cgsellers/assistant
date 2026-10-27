@@ -1,8 +1,9 @@
 import { HttpResponse, http } from "msw";
 import { singleDocumentHandlers } from "./document";
 import { listingHandlers } from "./listing";
+import { settingsHandlers } from "./settings";
 import { uploadHandlers } from "./uploads";
-import { MOCK_PASSWORD, MOCK_USER } from "./user";
+import { isSignedIn, MOCK_PASSWORD, MOCK_USER, me, setSignedIn } from "./user";
 
 /**
  * The API as the portal expects it, for running without a backend and for
@@ -10,18 +11,7 @@ import { MOCK_PASSWORD, MOCK_USER } from "./user";
  * the real response. Endpoints the API does not have yet are mocked here
  * first: each handler is the contract the backend then has to meet.
  */
-export { MOCK_PASSWORD, MOCK_USER };
-
-// Kept in sessionStorage, like a session cookie: a reload keeps you signed in,
-// closing the tab does not. Tests have their own, reset after each one.
-const SIGNED_IN = "ledgerline-mock-signed-in";
-let signedIn = globalThis.sessionStorage?.getItem(SIGNED_IN) === "yes";
-
-/** Tests start signed out unless they say otherwise. */
-export function setSignedIn(value: boolean) {
-  signedIn = value;
-  globalThis.sessionStorage?.setItem(SIGNED_IN, value ? "yes" : "no");
-}
+export { MOCK_PASSWORD, MOCK_USER, setSignedIn };
 
 export const handlers = [
   // Only the mock answers this: the sign-in page asks it to show whether the
@@ -30,9 +20,10 @@ export const handlers = [
   ...listingHandlers,
   ...singleDocumentHandlers,
   ...uploadHandlers,
+  ...settingsHandlers,
   http.get("/api/auth/me", () =>
-    signedIn
-      ? HttpResponse.json(MOCK_USER)
+    isSignedIn()
+      ? HttpResponse.json(me())
       : HttpResponse.json({ detail: "not signed in" }, { status: 401 }),
   ),
   http.post("/api/auth/login", async ({ request }) => {
@@ -41,7 +32,7 @@ export const handlers = [
       return HttpResponse.json({ detail: "wrong email or password" }, { status: 401 });
     }
     setSignedIn(true);
-    return HttpResponse.json(MOCK_USER);
+    return HttpResponse.json(me());
   }),
   http.post("/api/auth/logout", ({ request }) => {
     if (request.headers.get("x-csrf-token") !== MOCK_USER.csrf_token) {

@@ -16,6 +16,7 @@ import { Card } from "@/components/ui/card";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
+import { useCan } from "@/features/auth/can";
 import { ApiError } from "@/lib/api";
 import { formatDocumentDate, formatMoment, formatMoney } from "@/lib/format";
 import { apiUrl } from "@/lib/http";
@@ -72,6 +73,7 @@ function Loaded({ view }: { view: DocumentFields }) {
   const filename = document.filename ?? "document";
   const fileUrl = apiUrl(`/documents/${encodeURIComponent(document.id)}/file`).pathname;
   const review = useReview(view);
+  const { work } = useCan();
   const { editing } = review;
   const problems = problemCount(view);
 
@@ -106,6 +108,7 @@ function Loaded({ view }: { view: DocumentFields }) {
             view={view}
             actions={
               document.outcome === "needs_review" &&
+              work &&
               !editing && (
                 <div className="mt-3 flex flex-wrap gap-2">
                   <Button
@@ -150,9 +153,11 @@ function Loaded({ view }: { view: DocumentFields }) {
                       <span className="text-xs text-muted">
                         {view.processor.label} · version {view.processor.version}
                       </span>
-                      <Button variant="ghost" size="sm" onClick={() => review.start()}>
-                        <Pencil /> Edit
-                      </Button>
+                      {work && (
+                        <Button variant="ghost" size="sm" onClick={() => review.start()}>
+                          <Pencil /> Edit
+                        </Button>
+                      )}
                     </div>
                   )}
                 </div>

@@ -5,6 +5,7 @@ import type { DocumentQuery } from "@/api/contract";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { useCan } from "@/features/auth/can";
 import { apiUrl } from "@/lib/http";
 import { DocumentsTable, DocumentsTableSkeleton } from "./DocumentsTable";
 import { Filters } from "./Filters";
@@ -36,6 +37,7 @@ export function DocumentsPage() {
   const types = useDocumentTypes();
   const location = useLocation();
   const top = useRef<HTMLDivElement>(null);
+  const { work } = useCan();
 
   const trail = (location.state as PageTrail | null)?.trail ?? [];
   // Known only when this page was reached by paging; a bookmarked later page
@@ -62,11 +64,13 @@ export function DocumentsPage() {
                 <Download /> Export CSV
               </a>
             </Button>
-            <Button asChild>
-              <Link to="/upload">
-                <Upload /> Upload
-              </Link>
-            </Button>
+            {work && (
+              <Button asChild>
+                <Link to="/upload">
+                  <Upload /> Upload
+                </Link>
+              </Button>
+            )}
           </>
         }
       />
@@ -115,11 +119,13 @@ export function DocumentsPage() {
                 title="No documents yet"
                 body="Upload receipts and invoices here, or have your system send them with an API key. Each one appears here as soon as it arrives."
                 action={
-                  <Button asChild>
-                    <Link to="/upload">
-                      <Upload /> Upload documents
-                    </Link>
-                  </Button>
+                  work && (
+                    <Button asChild>
+                      <Link to="/upload">
+                        <Upload /> Upload documents
+                      </Link>
+                    </Button>
+                  )
                 }
               />
             )
@@ -173,7 +179,7 @@ function State({
   icon: ReactNode;
   title: string;
   body: string;
-  action: ReactNode;
+  action?: ReactNode;
   role?: "alert";
 }) {
   return (

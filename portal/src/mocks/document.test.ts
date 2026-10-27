@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { DocumentFields, FieldsRefused } from "@/api/contract";
 import { fieldsFor } from "./document";
 import { MOCK_DOCUMENTS } from "./documents";
-import { MOCK_USER } from "./user";
+import { MOCK_USER, setMockRole, setSignedIn } from "./user";
 
 describe("the mock documents", () => {
   it("read and checked from scratch, agree with the list about every document", () => {
@@ -74,5 +74,34 @@ describe("PATCH /documents/{id}/fields, as the backend must answer it", () => {
     expect(fieldsFor("doc-011")?.document.outcome).toBe("done");
     await patch("doc-011", { revision: 2, values: { vendor: "Coop" } });
     expect(fieldsFor("doc-011")?.document.outcome).toBe("needs_review");
+  });
+});
+
+describe("/settings, as the backend must answer it", () => {
+  const send = (method: string, path: string, body?: unknown, csrf = MOCK_USER.csrf_token ?? "") =>
+    fetch(new URL(`/api${path}`, window.location.origin), {
+      method,
+      headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+
+  it("lets anyone signed in read, and only an admin change anything", async () => {
+    setSignedIn(true);
+    setMockRole("member");
+    expect((await send("GET", "/settings/keys")).status).toBe(200);
+    expect((await send("POST", "/settings/keys", { name: "x" })).status).toBe(403);
+    expect((await send("DELETE", "/settings/keys/key-1")).status).toBe(403);
+    expect((await send("PATCH", "/settings/members/m-2", { role: "admin" })).status).toBe(403);
+  });
+
+  it("never leaves an organisation without an admin, nor lets you remove yourself", async () => {
+    setSignedIn(true);
+    expect((await send("PATCH", "/settings/members/m-1", { role: "member" })).status).toBe(409);
+    expect((await send("DELETE", "/settings/members/m-1")).status).toBe(409);
+  });
+
+  it("refuses a change without the CSRF token, even from an admin", async () => {
+    setSignedIn(true);
+    expect((await send("POST", "/settings/keys", { name: "x" }, "")).status).toBe(403);
   });
 });

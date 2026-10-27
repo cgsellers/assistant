@@ -180,3 +180,68 @@ export interface FieldsRefused {
   detail: string;
   fields?: Record<string, string>;
 }
+
+// --- Settings: a client's API keys and team (5.6) -------------------------------------
+// All under /settings, for the signed-in person's own organisation only. Reading
+// needs any role; every change needs "admin" (403 otherwise).
+
+/**
+ * What a person at a client may do. Not the team's "author"/"admin", which are
+ * about writing processors:
+ *   admin   -- everything a member can, plus API keys and the team
+ *   member  -- upload, review and correct
+ *   viewer  -- see documents and export them; change nothing
+ */
+export type ClientRole = "admin" | "member" | "viewer";
+
+/** One live API key. GET /settings/keys lists them; revoked keys are not listed. */
+export interface ApiKeyRow {
+  id: string;
+  name: string;
+  /** The start of the key, "lk_a1B2c3D4": enough to recognise it, not to use it. */
+  prefix: string;
+  created_at: string;
+  /** Who made it, or null for one made by the Ledgerline team. */
+  created_by: string | null;
+  last_used_at: string | null;
+}
+
+/**
+ * POST /settings/keys {name} -> the key, with its secret. The only time the
+ * secret is ever shown: Ledgerline keeps a hash of it, never the key itself.
+ */
+export interface CreatedKey {
+  key: ApiKeyRow;
+  secret: string;
+}
+
+/** DELETE /settings/keys/{id}: revoke it, at once. 204. */
+
+/** One person at the organisation. GET /settings/members. */
+export interface Member {
+  id: string;
+  email: string;
+  role: ClientRole;
+  /** "invited" until they accept and set a password. */
+  status: "active" | "invited";
+  last_seen_at: string | null;
+  /** The person asking. */
+  you: boolean;
+}
+
+/**
+ * POST /settings/members {email, role} -> the invitation. Ledgerline does not
+ * send email yet, so the answer carries a link for the admin to pass on: it
+ * works once, for seven days.
+ */
+export interface Invitation {
+  member: Member;
+  invite_url: string;
+  expires_at: string;
+}
+
+/**
+ * PATCH /settings/members/{id} {role} -> the member. DELETE -> 204.
+ * 409 for anything that would leave the organisation with no admin, and for
+ * removing yourself.
+ */

@@ -1604,6 +1604,19 @@ kept in brackets, so earlier sections that say "phase 6" still point somewhere.
 tree (the YAML editor stands in); a code editor in the panel instead of text areas; and
 scoring a draft against the eval corpus before publishing it (`evals.run --version`).
 
+**Backlog** (decided 2026-10-27, not yet scheduled):
+- **File storage per organisation.** Keys become `raw/{organisation}/ab/abcdef…`, not
+  `raw/ab/abcdef…`. Today identical bytes uploaded by two clients share one file. That
+  is not a leak, since every read goes through the client's own document row under RLS,
+  but it makes deletion unsafe: removing one client's file would first need a
+  cross-tenant check that RLS exists to refuse. With a prefix per organisation, a file
+  belongs to exactly one document, because dedup is already per organisation. That
+  makes possible deleting a document, erasing or exporting a client's data in one step
+  (GDPR, offboarding), and per-client retention or encryption on S3. Small:
+  `storage.save()` and `storage_key()` take the organisation, and there is no
+  migration, since each document stores its own key and old ones keep loading. Do it
+  with the move to object storage in step 6.
+
 **Why this order.**
 
 - **Authoring comes first** because steps 3 and 5 reuse its screens, users and API.
@@ -2170,6 +2183,30 @@ generated types and needs no new contract.
 - **Checked in WebKit, with screenshots:** uploads through the real file input; the
   receipt photo with its highlight landing on the printed total; the invoice highlight;
   the list; the editor refusing `1,234`.
+
+**5.6 built: settings, and roles for clients.** Contract: `/settings/keys` and
+`/settings/members`.
+- **Clients get their own roles.** The team's *author* and *admin* are about writing
+  processors and mean nothing to a client. A client's people are **admin** (also API
+  keys and the team), **member** (upload, review, correct) or **viewer** (see and
+  export, nothing else: an accountant, an auditor). The portal hides what a role cannot
+  do, and the API refuses it regardless. The backend adds `member` and `viewer` for
+  client users.
+- **API keys.** Make one per system, so each can be revoked alone. A new key's secret is
+  shown exactly once, with a copy button, a plain warning that Ledgerline keeps only its
+  fingerprint, and a `curl` example with the key already in it. The list shows the
+  11-character prefix (the same `VISIBLE` as `core/auth.py`), who made the key and when
+  it was last used. Revoking asks first and says what will break.
+- **The team.** Invite by email with a role. Ledgerline doesn't send email yet, so an
+  invitation is a one-time link, valid for seven days, which the admin passes on; the
+  dialog says so. Roles can be changed and people removed. The API refuses to leave an
+  organisation with no admin, and refuses to let you remove yourself (409); the portal
+  doesn't offer either.
+- **Every write takes an admin and the CSRF token.** The mock enforces both, and a test
+  calls it directly as a member, and without the token.
+- **That is every portal screen.** The placeholder is gone. Next, the backend for each
+  contract endpoint, with the mocks as its specification. As each lands, `npm run api`
+  regenerates the types and its entry leaves `contract.ts`.
 
 ### 9.2 Why Postgres
 

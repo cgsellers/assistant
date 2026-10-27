@@ -37,18 +37,25 @@ export async function getJson<T>(
   return (await response.json()) as T;
 }
 
-/** A change, with the session's CSRF token; the answer as JSON. */
+/**
+ * A change, with the session's CSRF token: the answer as JSON, or undefined
+ * for one with no body (204).
+ */
 export async function sendJson<T>(
   method: "POST" | "PUT" | "PATCH" | "DELETE",
   path: string,
-  body: unknown,
+  body?: unknown,
 ): Promise<T> {
   const response = await globalThis.fetch(apiUrl(path), {
     method,
     credentials: "same-origin",
-    headers: { "Content-Type": "application/json", ...csrfHeaders() },
-    body: JSON.stringify(body),
+    headers: {
+      ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+      ...csrfHeaders(),
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
   });
   if (!response.ok) throw await failure(response);
+  if (response.status === 204) return undefined as T;
   return (await response.json()) as T;
 }

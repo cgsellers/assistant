@@ -17,7 +17,7 @@ describe("signing in", () => {
     await signIn(user);
 
     await waitFor(() => expect(router.state.location.pathname).toBe("/settings"));
-    expect(await screen.findByText("Acme Ltd")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /Acme Ltd/ })).toBeInTheDocument();
   });
 
   it("explains a wrong password without saying which half was wrong", async () => {

@@ -10,14 +10,15 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { useCan } from "@/features/auth/can";
 import { useMe, useSignOut } from "@/features/auth/session";
 import { UploadIndicator, useUploadsEverywhere } from "@/features/upload/UploadIndicator";
 import { cn } from "@/lib/utils";
 
 const NAV = [
-  { to: "/documents", label: "Documents" },
-  { to: "/upload", label: "Upload" },
-  { to: "/settings", label: "Settings" },
+  { to: "/documents", label: "Documents", work: false },
+  { to: "/upload", label: "Upload", work: true },
+  { to: "/settings", label: "Settings", work: false },
 ];
 
 export function AppShell() {
@@ -25,6 +26,7 @@ export function AppShell() {
   const signOut = useSignOut();
   const navigate = useNavigate();
   useUploadsEverywhere();
+  const allowed = useCan();
 
   return (
     <div className="min-h-screen">
@@ -37,7 +39,7 @@ export function AppShell() {
             <MockBadge />
           </div>
           <nav className="flex items-center gap-1">
-            {NAV.map((item) => (
+            {NAV.filter((item) => !item.work || allowed.work).map((item) => (
               <NavLink
                 key={item.to}
                 to={item.to}

@@ -6,6 +6,7 @@ import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Spinner } from "@/components/ui/spinner";
+import { useCan } from "@/features/auth/can";
 import { useDocumentFields } from "@/features/documents/queries";
 import { formatMoment } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -13,6 +14,22 @@ import { ACCEPTED, pending, type Upload, uploads, useUploads } from "./queue";
 import type { DocumentOut } from "./send";
 
 export function UploadPage() {
+  const { work } = useCan();
+  if (!work) {
+    return (
+      <>
+        <PageHeader title="Upload" />
+        <Card className="p-10 text-center text-sm text-muted">
+          Your role can see documents but not upload them. An admin at your organisation can change
+          that in Settings.
+        </Card>
+      </>
+    );
+  }
+  return <Uploader />;
+}
+
+function Uploader() {
   const items = useUploads();
   const left = pending(items);
   const finished = items.some((u) => u.state.step === "received" || u.state.step === "refused");
