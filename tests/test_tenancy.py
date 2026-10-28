@@ -89,7 +89,10 @@ class TestDuplicates:
         assert created_first and created_second
         assert first.id != second.id  # Globex never gets Acme's document
         assert second.organisation_id == globex.id
-        assert first.storage_key == second.storage_key  # one copy of the bytes on disk
+        # A copy each, in each organisation's own folder (core/storage.py), so
+        # removing one client's file can never touch the other's.
+        assert first.storage_key == f"raw/{acme.id}/{first.sha256[:2]}/{first.sha256}"
+        assert second.storage_key == f"raw/{globex.id}/{second.sha256[:2]}/{second.sha256}"
 
     def test_the_same_organisation_uploading_twice_is_still_a_duplicate(self, session, acme):
         first, _ = repository.ingest(

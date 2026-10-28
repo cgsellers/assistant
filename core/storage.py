@@ -1,10 +1,18 @@
 """
-Content-addressed file storage.
+Content-addressed file storage, a folder per organisation.
 
-A file's SHA-256 is its address: identical bytes always land on the same path,
-so writing twice is a no-op rather than a duplicate. That property is what makes
-upload idempotent -- a client retrying a failed request cannot create a second
-copy.
+A file's SHA-256 is its address within its organisation's folder: identical
+bytes from the same organisation always land on the same path, so writing twice
+is a no-op rather than a duplicate. That property is what makes upload
+idempotent -- a client retrying a failed request cannot create a second copy.
+
+The folder per organisation is what makes a file belong to one document:
+dedup is per organisation too, so within a folder each file has exactly one
+document. Two clients sending identical bytes get a copy each. That costs a
+little disk and buys simple deletion -- removing a client's document can remove
+its file without asking whether another client's document uses the same bytes,
+a cross-tenant question row-level security exists to refuse -- and erasing or
+exporting a client is one folder (DESIGN §9, backlog).
 
 Local filesystem for now. Swapping in S3 later means reimplementing save/load
 against the same two-function surface.
@@ -13,6 +21,7 @@ against the same two-function surface.
 from __future__ import annotations
 
 import hashlib
+import re
 import tempfile
 from pathlib import Path
 
@@ -24,30 +33,39 @@ def sha256_hex(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def storage_key(digest: str) -> str:
-    """
-    Path for a digest, relative to STORAGE_DIR.
+#: Organisation ids are UUIDs; anything else is refused before it becomes a path.
+_ORGANISATION = re.compile(r"^[A-Za-z0-9-]{1,64}$")
 
-    Sharded on the first two hex characters: 256 subdirectories instead of one
-    flat folder with a million entries, which most filesystems handle badly.
-    No file extension -- the mime type lives in the database, and deriving a
-    path from a user-supplied filename is how you get path traversal.
+
+def storage_key(organisation_id: str, digest: str) -> str:
     """
-    return f"raw/{digest[:2]}/{digest}"
+    Path for a digest, relative to STORAGE_DIR: the organisation's folder,
+    then sharded on the first two hex characters -- 256 subdirectories instead
+    of one flat folder with a million entries, which most filesystems handle
+    badly. No file extension -- the mime type lives in the database, and
+    deriving a path from a user-supplied filename is how you get path
+    traversal. Documents stored before the folders existed keep their own
+    keys (`raw/ab/abcdef...`), which every document records, so they still load.
+    """
+    if not _ORGANISATION.match(organisation_id):
+        raise ValueError("not an organisation id")
+    if not re.fullmatch(r"[0-9a-f]{64}", digest):
+        raise ValueError("not a SHA-256 digest")
+    return f"raw/{organisation_id}/{digest[:2]}/{digest}"
 
 
 def _absolute(key: str) -> Path:
     return get_settings().storage_dir / key
 
 
-def save(data: bytes, digest: str) -> str:
+def save(data: bytes, digest: str, *, organisation_id: str) -> str:
     """
     Write bytes to their content-addressed location. Returns the storage key.
 
     Idempotent: if the file is already there, the bytes are by definition
     identical, so there is nothing to do.
     """
-    key = storage_key(digest)
+    key = storage_key(organisation_id, digest)
     path = _absolute(key)
 
     if path.exists():

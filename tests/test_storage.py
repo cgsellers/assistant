@@ -34,15 +34,36 @@ class TestSha256:
         assert shared_prefix < 4  # not merely different -- unrelated
 
 
+ORG = "0b7a4c2e-1d3f-4a5b-9c8d-7e6f5a4b3c2d"
+
+
 class TestStorageKey:
-    def test_shards_on_first_two_characters(self):
+    def test_a_folder_per_organisation_then_two_character_shards(self):
         digest = "ab" + "c" * 62
-        assert storage.storage_key(digest) == f"raw/ab/{digest}"
+        assert storage.storage_key(ORG, digest) == f"raw/{ORG}/ab/{digest}"
 
     def test_key_contains_no_user_supplied_filename(self):
         """Paths come from the hash, so a hostile filename cannot traverse."""
         digest = storage.sha256_hex(b"x")
-        assert storage.storage_key(digest) == f"raw/{digest[:2]}/{digest}"
+        assert storage.storage_key(ORG, digest) == f"raw/{ORG}/{digest[:2]}/{digest}"
+
+    @pytest.mark.parametrize("organisation", ["../other", "a/b", "", "x" * 65])
+    def test_an_organisation_that_is_not_an_id_never_becomes_a_path(self, organisation):
+        with pytest.raises(ValueError, match="not an organisation id"):
+            storage.storage_key(organisation, storage.sha256_hex(b"x"))
+
+    def test_nor_does_a_digest_that_is_not_one(self):
+        with pytest.raises(ValueError, match="not a SHA-256"):
+            storage.storage_key(ORG, "../../etc/passwd")
+
+    def test_the_same_bytes_from_two_organisations_are_two_files(self, settings):
+        data = b"the same invoice, sent by two clients"
+        digest = storage.sha256_hex(data)
+        other = "1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f"
+        mine, theirs = (storage.save(data, digest, organisation_id=o) for o in (ORG, other))
+        assert mine != theirs
+        assert (settings.storage_dir / mine).read_bytes() == data
+        assert (settings.storage_dir / theirs).read_bytes() == data
 
 
 class TestSniffMime:
@@ -78,14 +99,14 @@ class TestSaveAndLoad:
     def test_writes_to_its_content_addressed_path(self, settings):
         data = b"some file"
         digest = storage.sha256_hex(data)
-        key = storage.save(data, digest)
+        key = storage.save(data, digest, organisation_id=ORG)
 
-        assert key == f"raw/{digest[:2]}/{digest}"
+        assert key == f"raw/{ORG}/{digest[:2]}/{digest}"
         assert (settings.storage_dir / key).read_bytes() == data
 
     def test_round_trips(self, settings):
         data = b"round trip"
-        key = storage.save(data, storage.sha256_hex(data))
+        key = storage.save(data, storage.sha256_hex(data), organisation_id=ORG)
         assert storage.load(key) == data
 
     def test_saving_twice_is_a_noop(self, settings):
@@ -93,9 +114,9 @@ class TestSaveAndLoad:
         data = b"written twice"
         digest = storage.sha256_hex(data)
 
-        first = storage.save(data, digest)
+        first = storage.save(data, digest, organisation_id=ORG)
         mtime = (settings.storage_dir / first).stat().st_mtime_ns
-        second = storage.save(data, digest)
+        second = storage.save(data, digest, organisation_id=ORG)
 
         assert first == second
         # Untouched, not rewritten.
@@ -105,7 +126,7 @@ class TestSaveAndLoad:
     def test_leaves_no_temp_file_behind(self, settings):
         """A stray .tmp would eventually be mistaken for a real document."""
         data = b"atomic"
-        storage.save(data, storage.sha256_hex(data))
+        storage.save(data, storage.sha256_hex(data), organisation_id=ORG)
         assert list(Path(settings.storage_dir).rglob("*.tmp")) == []
 
     def test_simultaneous_saves_of_one_file_never_leave_it_partial(self, settings, monkeypatch):
@@ -128,7 +149,7 @@ class TestSaveAndLoad:
         def write():
             barrier.wait()
             try:
-                storage.save(data, digest)
+                storage.save(data, digest, organisation_id=ORG)
             except Exception as exc:  # noqa: BLE001 - collected and asserted below
                 errors.append(exc)
 
@@ -141,23 +162,23 @@ class TestSaveAndLoad:
         # A shared temp name also made the slower writer crash: the faster
         # one's rename had already taken the file out from under it.
         assert errors == []
-        stored = settings.storage_dir / storage.storage_key(digest)
+        stored = settings.storage_dir / storage.storage_key(ORG, digest)
         assert storage.sha256_hex(stored.read_bytes()) == digest
         assert list(Path(settings.storage_dir).rglob("*.tmp")) == []
 
     def test_creates_missing_directories(self, settings):
         assert not settings.storage_dir.exists()
-        storage.save(b"x", storage.sha256_hex(b"x"))
+        storage.save(b"x", storage.sha256_hex(b"x"), organisation_id=ORG)
         assert settings.storage_dir.exists()
 
     def test_exists_reports_correctly(self, settings):
         digest = storage.sha256_hex(b"here")
-        assert storage.exists(storage.storage_key(digest)) is False
-        storage.save(b"here", digest)
-        assert storage.exists(storage.storage_key(digest)) is True
+        assert storage.exists(storage.storage_key(ORG, digest)) is False
+        storage.save(b"here", digest, organisation_id=ORG)
+        assert storage.exists(storage.storage_key(ORG, digest)) is True
 
     def test_stored_bytes_hash_to_their_own_filename(self, settings):
         """Self-verifying storage: the address is a checksum of the contents."""
         data = b"integrity"
-        key = storage.save(data, storage.sha256_hex(data))
+        key = storage.save(data, storage.sha256_hex(data), organisation_id=ORG)
         assert hashlib.sha256(storage.load(key)).hexdigest() == Path(key).name

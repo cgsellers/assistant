@@ -60,7 +60,7 @@ def ingest(
     already ingested these exact bytes -- the caller gets its original document
     back and nothing new is written. That makes upload safe to retry. Another
     organisation's identical file is not a duplicate: it gets its own document,
-    though the bytes on disk are shared, since storage is addressed by content.
+    and its own copy of the bytes, in its own folder (core/storage.py).
     """
     digest = storage.sha256_hex(data)
 
@@ -70,7 +70,7 @@ def ingest(
 
     # Write the file before the row. A file with no row is harmless garbage a
     # sweeper can collect; a row pointing at a missing file breaks the worker.
-    key = storage.save(data, digest)
+    key = storage.save(data, digest, organisation_id=organisation_id)
 
     original_filename = _fit_filename(original_filename)
     document = Document(
