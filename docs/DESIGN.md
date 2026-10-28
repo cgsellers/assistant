@@ -2321,8 +2321,51 @@ only the settings endpoints.
 - Found on the way: on a field, `required` only shapes the model's JSON schema. Absence
   belongs to the `required` *rule*, by design (`validate.py`), which is why the seeded
   receipt and invoice both have one for their total.
-- Not yet: client roles. A viewer must not correct, but the roles arrive with the
-  settings backend; until then, anyone signed in at the organisation may correct.
+- Client roles came with backend 4: a viewer is now refused (403).
+
+**Backend 4: settings, invitations and client roles.** `/settings/keys`,
+`/settings/members` and `/auth/invitation(/accept)` are built. Every endpoint the portal
+uses is real now, and `contract.ts` is only the names the screens use for the API's
+types. Mock mode stays, for demos and for building screens ahead of their endpoints.
+- **Clients have their own roles**, on the same column as the team's. Admin manages keys
+  and people; member uploads and corrects; viewer only looks. A client can never hold
+  *author*, which only means something for processors, and a new user defaults to the
+  organisation's own kind of role. Client accounts that held *author* became *member*
+  in the migration, which is what they effectively were. The checks are in one place:
+  `require_work` (everyone but a viewer: uploads, corrections) and `require_manage`
+  (an admin, and a person). The PATCH checks the role after finding the document, so a
+  viewer asking about another client's document still sees "not found".
+- **Settings are for people.** A key gets 403 on every `/settings` route, reading
+  included: keys live inside other systems and must not be able to make more keys. A
+  key made in Settings is a *member*: it uploads and corrects, for its own organisation
+  only, and its secret is in the creating answer and nowhere else.
+- **Invitations are links**, since Ledgerline sends no email yet. The token is 256
+  random bits, kept only as a hash. A link works once, for `INVITATION_DAYS`, and
+  inviting the same person again replaces it. The link is built from `PORTAL_URL`,
+  never from the request's Host or Origin, which the caller controls: that is how
+  password-reset links get pointed at an attacker's site. The two public routes take
+  the token in a POST body, so `PUBLIC_PATHS` stays a list of exact paths and tokens
+  stay out of logs. The accept page takes the token out of the address bar as soon as
+  it has read it.
+- **The rules hold server-side:** never the last admin, never yourself. Removing someone
+  disables their account and ends their sessions at once, rather than deleting it, so
+  what they corrected or approved keeps meaning someone. Inviting them back brings the
+  same account back, with a new password.
+- **One trade-off, written down.** An email is one account across Ledgerline, so an
+  admin inviting an address that already has an account elsewhere is told it can't be
+  invited. That reveals that the address has an account somewhere, though not where.
+  Accounts spanning several organisations would remove it, at a cost not worth paying
+  yet.
+- **Checked against the real API, not only the mocks.** On a throwaway copy of the dev
+  database, with its own API and portal, a WebKit browser lacking stream iteration (as
+  Safari 26 does) did the whole round:
+  - signed in and opened the real list and a real PDF;
+  - corrected a field;
+  - made a key, which then worked for a machine;
+  - invited a viewer, who opened the link in a separate browser, joined, and saw no
+    Upload.
+
+  No page errors, no server errors. The copy was then deleted.
 
 ### 9.2 Why Postgres
 
