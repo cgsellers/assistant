@@ -7,9 +7,13 @@
 #   docker compose --profile app up -d --build
 #       Everything in containers, shaped the way a deployment is: the
 #       database is migrated first, then the API and worker start from one
-#       image, and the OCR container sits on a network with no way out.
-#       The API answers on http://localhost:8080 (8000 stays free for the
-#       dev server).
+#       image, the OCR container sits on a network with no way out, and
+#       Caddy serves the whole product on one origin: the portal at
+#       http://localhost:8080, the API under /api, the panel under /panel.
+#       (8000 and 5173 stay free for the dev servers.)
+#
+#       A demo client full of documents, at no cost (demo/seed.py):
+#       docker compose --profile app run --rm api python -m demo.seed
 #
 # Postgres has no profile, so it runs in both.
 
@@ -60,6 +64,10 @@ x-app-env: &app-env
   ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
   # Plain http on localhost here; a deployment behind TLS leaves it on.
   SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
+  # Where invitation links point: the portal, as Caddy serves it.
+  PORTAL_URL: ${PORTAL_URL:-http://localhost:8080}
+  # Optional: a daily cap on model spend, in dollars (core/spend.py).
+  MAX_DAILY_SPEND_USD: ${MAX_DAILY_SPEND_USD:-}
 
 x-app: &app
   build:
@@ -140,8 +148,7 @@ services:
   api:
     <<: *app
     container_name: ledgerline-api
-    ports:
-      - "127.0.0.1:8080:8000"
+    # Not published: everything reaches it through Caddy, on one origin.
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -153,6 +160,35 @@ services:
       timeout: 5s
       start_period: 20s
       retries: 3
+    restart: unless-stopped
+
+  # The front door: the portal's built files, and /api and /panel proxied to
+  # the API (deploy/Caddyfile). The only container with a published port
+  # besides the database's loopback one.
+  web:
+    build:
+      context: .
+      dockerfile: portal/Dockerfile
+    image: ledgerline-web:dev
+    profiles: [app]
+    container_name: ledgerline-web
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-:8080}
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      api:
+        condition: service_healthy
+    networks: [backend]
+    read_only: true
+    tmpfs:
+      # Caddy's own scratch space, owned by the user it runs as.
+      - /data:uid=1000,gid=1000
+      - /config:uid=1000,gid=1000
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     restart: unless-stopped
 
   worker:

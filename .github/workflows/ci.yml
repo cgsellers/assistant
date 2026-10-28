@@ -142,21 +142,25 @@ jobs:
         run: docker build -t ledgerline-app:ci -f Dockerfile .
       - name: Build the OCR image
         run: docker build -t ledgerline-ocr:ci -f services/ocr_service/Dockerfile .
+      - name: Build the web image (the portal, behind Caddy)
+        run: docker build -t ledgerline-web:ci -f portal/Dockerfile .
+      - name: The web image's proxy configuration is valid
+        run: docker run --rm --entrypoint caddy ledgerline-web:ci validate --config /etc/caddy/Caddyfile --adapter caddyfile
       - name: The app image starts
         run: |
           docker run --rm -e DATABASE_URL=postgresql+psycopg://x:y@nowhere/z \
             --entrypoint python ledgerline-app:ci -c "import api.main, worker.run"
-      - name: Neither image runs as root
+      - name: No image runs as root
         run: |
-          for image in ledgerline-app:ci ledgerline-ocr:ci; do
+          for image in ledgerline-app:ci ledgerline-ocr:ci ledgerline-web:ci; do
             uid=$(docker run --rm --entrypoint id "$image" -u)
             if [ "$uid" = "0" ]; then echo "$image runs as root"; exit 1; fi
           done
-      - name: No secrets or private data in either image
+      - name: No secrets or private data in any image
         # The root .dockerignore is what keeps them out; this is what notices
         # if a change to it, or to a COPY line, lets them in.
         run: |
-          for image in ledgerline-app:ci ledgerline-ocr:ci; do
+          for image in ledgerline-app:ci ledgerline-ocr:ci ledgerline-web:ci; do
             docker run --rm --entrypoint sh "$image" -c '
               found=$(find / -xdev \( -name ".env" -o -path "*/data/evals*" -o -name "ledgerline.db" \) 2>/dev/null)
               if [ -n "$found" ]; then echo "found in image: $found"; exit 1; fi'
