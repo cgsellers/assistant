@@ -4,6 +4,48 @@
  */
 
 export interface paths {
+    "/auth/invitation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Look up an invitation
+         * @description 404, with one message, for a link that was used, withdrawn, replaced or has expired.
+         */
+        post: operations["look_up_invitation_auth_invitation_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/invitation/accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Accept an invitation
+         * @description Choose a password and join: the account is made (or a removed one at the
+         *     same organisation comes back), the invitation is spent, and the browser is
+         *     signed in, as after /auth/login.
+         */
+        post: operations["accept_invitation_auth_invitation_accept_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/login": {
         parameters: {
             query?: never;
@@ -551,10 +593,116 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/settings/keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The organisation's API keys
+         * @description Live keys, newest first. Revoked ones are kept, for the audit, but not listed.
+         */
+        get: operations["list_keys_settings_keys_get"];
+        put?: never;
+        /**
+         * Make an API key
+         * @description A key for one of the organisation's own systems. It may upload and correct
+         *     documents, and see only this organisation's. Its secret is in this answer
+         *     and nowhere else, ever.
+         */
+        post: operations["create_key_settings_keys_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/settings/keys/{key_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Revoke an API key
+         * @description At once: anything using it is refused from its next request.
+         */
+        delete: operations["revoke_key_settings_keys__key_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/settings/members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Who can sign in
+         * @description Everyone who can sign in, then everyone invited who has not accepted yet.
+         */
+        get: operations["list_members_settings_members_get"];
+        put?: never;
+        /**
+         * Invite someone
+         * @description An invitation, as a link for the admin to pass on. It works once, for a
+         *     week; inviting the same person again replaces it.
+         */
+        post: operations["invite_settings_members_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/settings/members/{member_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove someone
+         * @description Withdraw an invitation, or stop someone signing in: their sessions end now.
+         *     What they corrected or approved stays on record. Not yourself, and not the
+         *     last admin (409).
+         */
+        delete: operations["remove_member_settings_members__member_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Change someone's role
+         * @description Refused (409) if it would leave the organisation with no admin.
+         */
+        patch: operations["change_role_settings_members__member_id__patch"];
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AcceptIn */
+        AcceptIn: {
+            /** Name */
+            name?: string | null;
+            /** Password */
+            password: string;
+            /** Token */
+            token: string;
+        };
         /**
          * AccessIn
          * @description Every organisation, or exactly these (by slug). Replaces what was there.
@@ -579,6 +727,24 @@ export interface components {
             nobody: boolean;
             /** Organisations */
             organisations: string[];
+        };
+        /** ApiKeyOut */
+        ApiKeyOut: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Created By */
+            created_by: string | null;
+            /** Id */
+            id: string;
+            /** Last Used At */
+            last_used_at: string | null;
+            /** Name */
+            name: string;
+            /** Prefix */
+            prefix: string;
         };
         /**
          * Base64Upload
@@ -648,6 +814,12 @@ export interface components {
             by: string;
             /** Was */
             was: string | number | boolean | null;
+        };
+        /** CreatedKeyOut */
+        CreatedKeyOut: {
+            key: components["schemas"]["ApiKeyOut"];
+            /** Secret */
+            secret: string;
         };
         /**
          * DefinitionIn
@@ -927,6 +1099,54 @@ export interface components {
             /** What */
             what: string;
         };
+        /** InvitationCreatedOut */
+        InvitationCreatedOut: {
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /** Invite Url */
+            invite_url: string;
+            member: components["schemas"]["MemberOut"];
+        };
+        /** InvitationIn */
+        InvitationIn: {
+            /** Token */
+            token: string;
+        };
+        /**
+         * InvitationOut
+         * @description Whose invitation a link is, so the page can say so before asking for a password.
+         */
+        InvitationOut: {
+            /** Email */
+            email: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /** Organisation Name */
+            organisation_name: string;
+            /** Role */
+            role: string;
+        };
+        /** InviteIn */
+        InviteIn: {
+            /** Email */
+            email: string;
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "author" | "admin" | "member" | "viewer";
+        };
+        /** KeyIn */
+        KeyIn: {
+            /** Name */
+            name: string;
+        };
         /** LedgerRowOut */
         LedgerRowOut: {
             /** Amount */
@@ -1014,6 +1234,27 @@ export interface components {
             organisation_name?: string | null;
             /** Role */
             role: string;
+        };
+        /** MemberOut */
+        MemberOut: {
+            /** Email */
+            email: string;
+            /** Id */
+            id: string;
+            /** Last Seen At */
+            last_seen_at: string | null;
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "author" | "admin" | "member" | "viewer";
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "active" | "invited";
+            /** You */
+            you: boolean;
         };
         /** MoneyOut */
         MoneyOut: {
@@ -1106,6 +1347,14 @@ export interface components {
             /** Status */
             status: string;
             transaction: components["schemas"]["LedgerRowOut"] | null;
+        };
+        /** RoleIn */
+        RoleIn: {
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "author" | "admin" | "member" | "viewer";
         };
         /** ScalarFieldOut */
         ScalarFieldOut: {
@@ -1285,6 +1534,72 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    look_up_invitation_auth_invitation_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InvitationIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvitationOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    accept_invitation_auth_invitation_accept_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AcceptIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     login_auth_login_post: {
         parameters: {
             query?: never;
@@ -2237,6 +2552,205 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+        };
+    };
+    list_keys_settings_keys_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiKeyOut"][];
+                };
+            };
+        };
+    };
+    create_key_settings_keys_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["KeyIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreatedKeyOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revoke_key_settings_keys__key_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_members_settings_members_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemberOut"][];
+                };
+            };
+        };
+    };
+    invite_settings_members_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InviteIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvitationCreatedOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remove_member_settings_members__member_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                member_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    change_role_settings_members__member_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                member_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RoleIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemberOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

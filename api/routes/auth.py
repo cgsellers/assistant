@@ -1,5 +1,5 @@
 """
-/auth -- signing people in and out of the panel.
+/auth -- signing people in and out, and joining by invitation.
 
 Machines never come here: they send an API key with each request. A sign-in
 mints a server-side session (core/users.py) and sets its token as a cookie
@@ -9,11 +9,13 @@ panel must send back on every request that changes something.
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from core import users
+from core import people, users
 from core.auth import CSRF_HEADER, SESSION_COOKIE, Principal, require_principal
 from core.config import get_settings
 from core.db import get_session
@@ -113,3 +115,58 @@ def _organisation_name(session: Session, organisation_id: str | None) -> str | N
         return None
     organisation = session.get(Organisation, organisation_id)
     return organisation.name if organisation is not None else None
+
+
+# --- Joining by invitation (DESIGN §9.4) ---------------------------------------------
+# Public: the person has no account yet. The token travels in the body, never
+# the path, so PUBLIC_PATHS stays a list of exact paths and the token stays
+# out of logs. 256 random bits, so guessing one is not a concern.
+
+GONE = "This invitation link doesn't work any more. Ask for a new one."
+
+
+class InvitationIn(BaseModel):
+    token: str = Field(max_length=200)
+
+
+class InvitationOut(BaseModel):
+    """Whose invitation a link is, so the page can say so before asking for a password."""
+
+    email: str
+    organisation_name: str
+    role: str
+    expires_at: datetime
+
+
+class AcceptIn(BaseModel):
+    token: str = Field(max_length=200)
+    password: str = Field(max_length=1000)
+    name: str | None = Field(default=None, max_length=200)
+
+
+@router.post("/invitation", response_model=InvitationOut, summary="Look up an invitation")
+def look_up_invitation(body: InvitationIn, session: Session = Depends(get_session)):
+    """404, with one message, for a link that was used, withdrawn, replaced or has expired."""
+    found = people.invitation(session, body.token)
+    if found is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, GONE)
+    return InvitationOut(
+        email=found.email,
+        organisation_name=_organisation_name(session, found.organisation_id) or "",
+        role=found.role,
+        expires_at=found.expires_at,
+    )
+
+
+@router.post("/invitation/accept", response_model=MeOut, summary="Accept an invitation")
+def accept_invitation(body: AcceptIn, response: Response, session: Session = Depends(get_session)):
+    """
+    Choose a password and join: the account is made (or a removed one at the
+    same organisation comes back), the invitation is spent, and the browser is
+    signed in, as after /auth/login.
+    """
+    try:
+        user = people.accept(session, body.token, body.password, name=body.name)
+    except people.Refused as exc:
+        raise HTTPException(exc.status, str(exc)) from None
+    return login(SignInIn(email=user.email, password=body.password), response, session)

@@ -9,7 +9,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from api.routes import auth, costs, documents, processors
+from api.routes import auth, costs, documents, processors, settings
 from core import migrations
 from core.auth import require_principal
 from core.config import get_settings
@@ -42,6 +42,7 @@ app = FastAPI(
 
 app.include_router(auth.router)
 app.include_router(documents.router)
+app.include_router(settings.router)
 app.include_router(costs.router)
 app.include_router(processors.router)
 app.include_router(panel.router)

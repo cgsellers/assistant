@@ -17,6 +17,8 @@ The kinds:
   client_document_write
                    changes one document by id -- likewise, whatever is sent
   client_listing   reads many -- a client sees nothing of anyone else's
+  settings_read    an organisation's keys and people: people only, own only
+  settings_write   changing them: likewise, and another's look missing
   team             the processor API and the panel: the Ledgerline team only
   team_document    a panel page about one document: team only, and even a
                    team *key* (never staff) sees only the team's own
@@ -52,6 +54,15 @@ ROUTES: dict[tuple[str, str], str] = {
     ("POST", "/auth/login"): "public",
     ("GET", "/panel/login"): "public",
     ("POST", "/panel/login"): "public",
+    ("POST", "/auth/invitation"): "public",
+    ("POST", "/auth/invitation/accept"): "public",
+    ("GET", "/settings/keys"): "settings_read",
+    ("GET", "/settings/members"): "settings_read",
+    ("POST", "/settings/keys"): "settings_write",
+    ("DELETE", "/settings/keys/{key_id}"): "settings_write",
+    ("POST", "/settings/members"): "settings_write",
+    ("PATCH", "/settings/members/{member_id}"): "settings_write",
+    ("DELETE", "/settings/members/{member_id}"): "settings_write",
     ("POST", "/auth/logout"): "self",
     ("GET", "/auth/me"): "self",
     ("POST", "/panel/logout"): "self",
@@ -170,10 +181,13 @@ def world(_wired, session):
             session, document_id=document.id, doc_type="receipt", schema_version=1,
             model_used="m", raw_json={"vendor": f"{slug} vendor"}, cost_usd=Decimal("0.01"),
         )
-        _, key = auth.create(session, f"{slug} erp", organisation_id=org.id, role="admin")
-        users.create(session, f"bo@{slug}.test", PASSWORD, organisation_id=org.id,
-                     is_staff=False, role="admin")
-        out[slug] = {"org": org, "document": document.id, "key": key}
+        key_row, key = auth.create(session, f"{slug} erp", organisation_id=org.id, role="admin")
+        person = users.create(session, f"bo@{slug}.test", PASSWORD, organisation_id=org.id,
+                              is_staff=False, role="admin")
+        out[slug] = {
+            "org": org, "document": document.id, "key": key,
+            "key_id": key_row.id, "member_id": person.id,
+        }
     users.create(session, "ana@ledgerline.test", PASSWORD,
                  organisation_id=demo_org_id(session), is_staff=True, role="admin")
     _, out["team_key"] = auth.create(
@@ -186,6 +200,8 @@ def world(_wired, session):
 def _path(template: str, world) -> str:
     return (
         template.replace("{document_id}", world["globex"]["document"])
+        .replace("{key_id}", world["globex"]["key_id"])
+        .replace("{member_id}", world["globex"]["member_id"])
         .replace("{name}", "receipt")
         .replace("{version}", "1")
     )
@@ -218,6 +234,8 @@ def test_public_routes_answer_without_credentials(world, anon_client, route):
 @pytest.mark.parametrize(
     "route",
     _of("self")
+    + _of("settings_read")
+    + _of("settings_write")
     + _of("client_document")
     + _of("client_document_write")
     + _of("client_listing")
@@ -272,6 +290,48 @@ def test_staff_do_reach_a_change_so_the_404_is_isolation(world, route):
     with browser:
         response = browser.request(method, _path(path, world), json=CHANGE, headers=csrf)
     assert response.status_code not in (401, 403, 404)
+
+
+#: What each settings change sends, so the answer is about who asks, not the body.
+SETTINGS_BODY = {
+    "/settings/keys": {"name": "probe"},
+    "/settings/members": {"email": "probe@example.test", "role": "viewer"},
+    "/settings/members/{member_id}": {"role": "viewer"},
+}
+
+
+@pytest.mark.parametrize("route", _of("settings_read") + _of("settings_write"), ids=_label)
+def test_settings_are_for_people_not_keys(world, route):
+    method, path = route
+    with _key(world["acme"]["key"]) as acme:
+        response = acme.request(method, _path(path, world), json=SETTINGS_BODY.get(path))
+    assert response.status_code == 403
+
+
+@pytest.mark.parametrize("route", _of("settings_read"), ids=_label)
+def test_settings_show_nothing_of_another_client(world, route):
+    method, path = route
+    browser, _ = _signed_in("bo@acme.test")
+    with browser:
+        body = _call(browser, method, path).text
+    assert "bo@acme.test" in body or "acme erp" in body
+    for marker in ("Globex", "bo@globex.test", "globex erp", world["globex"]["member_id"]):
+        assert marker not in body, f"{marker!r} leaked through {method} {path}"
+
+
+@pytest.mark.parametrize(
+    "route", [r for r in _of("settings_write") if "{" in r[1]], ids=_label
+)
+def test_another_clients_key_or_person_looks_missing(world, route):
+    method, path = route
+    browser, csrf = _signed_in("bo@acme.test")
+    missing = path.replace("{key_id}", "no-such-key").replace("{member_id}", "no-such-member")
+    with browser:
+        body = SETTINGS_BODY.get(path)
+        theirs = browser.request(method, _path(path, world), json=body, headers=csrf)
+        nobody = browser.request(method, missing, json=body, headers=csrf)
+    assert theirs.status_code == 404
+    assert theirs.content == nobody.content
 
 
 @pytest.mark.parametrize("route", _of("client_listing"), ids=_label)

@@ -1,6 +1,38 @@
 {
   "components": {
     "schemas": {
+      "AcceptIn": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "password": {
+            "maxLength": 1000,
+            "title": "Password",
+            "type": "string"
+          },
+          "token": {
+            "maxLength": 200,
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token",
+          "password"
+        ],
+        "title": "AcceptIn",
+        "type": "object"
+      },
       "AccessIn": {
         "description": "Every organisation, or exactly these (by slug). Replaces what was there.",
         "properties": {
@@ -76,6 +108,60 @@
           "changed_by"
         ],
         "title": "AccessOut",
+        "type": "object"
+      },
+      "ApiKeyOut": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "last_used_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Used At"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "prefix": {
+            "title": "Prefix",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "prefix",
+          "created_at",
+          "created_by",
+          "last_used_at"
+        ],
+        "title": "ApiKeyOut",
         "type": "object"
       },
       "Base64Upload": {
@@ -237,6 +323,23 @@
           "was"
         ],
         "title": "CorrectionOut",
+        "type": "object"
+      },
+      "CreatedKeyOut": {
+        "properties": {
+          "key": {
+            "$ref": "#/components/schemas/ApiKeyOut"
+          },
+          "secret": {
+            "title": "Secret",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "secret"
+        ],
+        "title": "CreatedKeyOut",
         "type": "object"
       },
       "DefinitionIn": {
@@ -1052,6 +1155,112 @@
         "title": "HistoryEntryOut",
         "type": "object"
       },
+      "InvitationCreatedOut": {
+        "properties": {
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "invite_url": {
+            "title": "Invite Url",
+            "type": "string"
+          },
+          "member": {
+            "$ref": "#/components/schemas/MemberOut"
+          }
+        },
+        "required": [
+          "member",
+          "invite_url",
+          "expires_at"
+        ],
+        "title": "InvitationCreatedOut",
+        "type": "object"
+      },
+      "InvitationIn": {
+        "properties": {
+          "token": {
+            "maxLength": 200,
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "title": "InvitationIn",
+        "type": "object"
+      },
+      "InvitationOut": {
+        "description": "Whose invitation a link is, so the page can say so before asking for a password.",
+        "properties": {
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "organisation_name": {
+            "title": "Organisation Name",
+            "type": "string"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email",
+          "organisation_name",
+          "role",
+          "expires_at"
+        ],
+        "title": "InvitationOut",
+        "type": "object"
+      },
+      "InviteIn": {
+        "properties": {
+          "email": {
+            "maxLength": 254,
+            "title": "Email",
+            "type": "string"
+          },
+          "role": {
+            "enum": [
+              "author",
+              "admin",
+              "member",
+              "viewer"
+            ],
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email",
+          "role"
+        ],
+        "title": "InviteIn",
+        "type": "object"
+      },
+      "KeyIn": {
+        "properties": {
+          "name": {
+            "maxLength": 200,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "KeyIn",
+        "type": "object"
+      },
       "LedgerRowOut": {
         "properties": {
           "amount": {
@@ -1351,6 +1560,62 @@
         "title": "MeOut",
         "type": "object"
       },
+      "MemberOut": {
+        "properties": {
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "last_seen_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Seen At"
+          },
+          "role": {
+            "enum": [
+              "author",
+              "admin",
+              "member",
+              "viewer"
+            ],
+            "title": "Role",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "active",
+              "invited"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "you": {
+            "title": "You",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "email",
+          "role",
+          "status",
+          "last_seen_at",
+          "you"
+        ],
+        "title": "MemberOut",
+        "type": "object"
+      },
       "MoneyOut": {
         "properties": {
           "amount": {
@@ -1613,6 +1878,25 @@
           "extracted_at"
         ],
         "title": "ResultOut",
+        "type": "object"
+      },
+      "RoleIn": {
+        "properties": {
+          "role": {
+            "enum": [
+              "author",
+              "admin",
+              "member",
+              "viewer"
+            ],
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "role"
+        ],
+        "title": "RoleIn",
         "type": "object"
       },
       "ScalarFieldOut": {
@@ -2195,6 +2479,90 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/auth/invitation": {
+      "post": {
+        "description": "404, with one message, for a link that was used, withdrawn, replaced or has expired.",
+        "operationId": "look_up_invitation_auth_invitation_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InvitationIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvitationOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Look up an invitation",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/invitation/accept": {
+      "post": {
+        "description": "Choose a password and join: the account is made (or a removed one at the\nsame organisation comes back), the invitation is spent, and the browser is\nsigned in, as after /auth/login.",
+        "operationId": "accept_invitation_auth_invitation_accept_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AcceptIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Accept an invitation",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
     "/auth/login": {
       "post": {
         "description": "401 for every failure -- wrong password, unknown email, disabled or\nlocked -- so this cannot be used to find out who has an account. Ten\nfailures in a row lock the account for fifteen minutes.",
@@ -3856,6 +4224,261 @@
           }
         },
         "summary": "Ready"
+      }
+    },
+    "/settings/keys": {
+      "get": {
+        "description": "Live keys, newest first. Revoked ones are kept, for the audit, but not listed.",
+        "operationId": "list_keys_settings_keys_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ApiKeyOut"
+                  },
+                  "title": "Response List Keys Settings Keys Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "The organisation's API keys",
+        "tags": [
+          "settings"
+        ]
+      },
+      "post": {
+        "description": "A key for one of the organisation's own systems. It may upload and correct\ndocuments, and see only this organisation's. Its secret is in this answer\nand nowhere else, ever.",
+        "operationId": "create_key_settings_keys_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KeyIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreatedKeyOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Make an API key",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/settings/keys/{key_id}": {
+      "delete": {
+        "description": "At once: anything using it is refused from its next request.",
+        "operationId": "revoke_key_settings_keys__key_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "title": "Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Revoke an API key",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/settings/members": {
+      "get": {
+        "description": "Everyone who can sign in, then everyone invited who has not accepted yet.",
+        "operationId": "list_members_settings_members_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MemberOut"
+                  },
+                  "title": "Response List Members Settings Members Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Who can sign in",
+        "tags": [
+          "settings"
+        ]
+      },
+      "post": {
+        "description": "An invitation, as a link for the admin to pass on. It works once, for a\nweek; inviting the same person again replaces it.",
+        "operationId": "invite_settings_members_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InviteIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvitationCreatedOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Invite someone",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/settings/members/{member_id}": {
+      "delete": {
+        "description": "Withdraw an invitation, or stop someone signing in: their sessions end now.\nWhat they corrected or approved stays on record. Not yourself, and not the\nlast admin (409).",
+        "operationId": "remove_member_settings_members__member_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "member_id",
+            "required": true,
+            "schema": {
+              "title": "Member Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Remove someone",
+        "tags": [
+          "settings"
+        ]
+      },
+      "patch": {
+        "description": "Refused (409) if it would leave the organisation with no admin.",
+        "operationId": "change_role_settings_members__member_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "member_id",
+            "required": true,
+            "schema": {
+              "title": "Member Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RoleIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemberOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Change someone's role",
+        "tags": [
+          "settings"
+        ]
       }
     }
   }
