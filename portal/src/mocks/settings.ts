@@ -1,6 +1,6 @@
 import { HttpResponse, http } from "msw";
 import type { ApiKeyRow, ClientRole, CreatedKey, Invitation, Member } from "@/api/contract";
-import { hasCsrf, isSignedIn, MOCK_USER, mockRole } from "./user";
+import { hasCsrf, isSignedIn, MOCK_USER, me, mockRole, setSignedIn } from "./user";
 
 /**
  * /settings: Acme's API keys and team, as the backend must answer for them.
@@ -63,11 +63,35 @@ function startingMembers(): Member[] {
 let keys = startingKeys();
 let members = startingMembers();
 let counter = 0;
+/** Invitation links by token, as the API keeps them (by hash). */
+let invitations = new Map<string, Invitation>();
 
 export function resetSettings() {
   keys = startingKeys();
   members = startingMembers();
   counter = 0;
+  invitations = new Map();
+}
+
+/** A pending invitation, for tests and demos: its token, as the link carries it. */
+export function mockInvitation(email: string, role: ClientRole = "member"): string {
+  counter += 1;
+  const token = `mock-${counter}-${crypto.randomUUID()}`;
+  const member: Member = {
+    id: `m-new-${counter}`,
+    email,
+    role,
+    status: "invited",
+    last_seen_at: null,
+    you: false,
+  };
+  members = [...members, member];
+  invitations.set(token, {
+    member,
+    invite_url: `${new URL("/accept-invite", location.origin).href}?token=${token}`,
+    expires_at: new Date(Date.now() + 7 * 86_400_000).toISOString(),
+  });
+  return token;
 }
 
 const refuse = (status: number, detail: string) => HttpResponse.json({ detail }, { status });
@@ -142,22 +166,8 @@ export const settingsHandlers = [
     if (!ROLES.includes(role)) return refuse(422, "Choose admin, member or viewer.");
     if (members.some((m) => m.email === email))
       return refuse(409, `${email} is already in the team.`);
-    counter += 1;
-    const member: Member = {
-      id: `m-new-${counter}`,
-      email,
-      role,
-      status: "invited",
-      last_seen_at: null,
-      you: false,
-    };
-    members = [...members, member];
-    const invitation: Invitation = {
-      member,
-      invite_url: `${new URL("/accept-invite", location.origin).href}?token=mock-${counter}-${crypto.randomUUID()}`,
-      expires_at: new Date(Date.now() + 7 * 86_400_000).toISOString(),
-    };
-    return HttpResponse.json(invitation, { status: 201 });
+    const token = mockInvitation(email, role);
+    return HttpResponse.json(invitations.get(token), { status: 201 });
   }),
 
   http.patch("/api/settings/members/:id", async ({ request, params }) => {
@@ -190,5 +200,33 @@ export const settingsHandlers = [
     }
     members = members.filter((m) => m.id !== member.id);
     return new HttpResponse(null, { status: 204 });
+  }),
+
+  // --- Joining by invitation: public, as in the API ---------------------------------
+  http.post("/api/auth/invitation", async ({ request }) => {
+    const { token } = (await request.json()) as { token?: string };
+    const found = token ? invitations.get(token) : undefined;
+    if (!found)
+      return refuse(404, "This invitation link doesn't work any more. Ask for a new one.");
+    return HttpResponse.json({
+      email: found.member.email,
+      organisation_name: MOCK_USER.organisation_name,
+      role: found.member.role,
+      expires_at: found.expires_at,
+    });
+  }),
+
+  http.post("/api/auth/invitation/accept", async ({ request }) => {
+    const { token, password } = (await request.json()) as { token?: string; password?: string };
+    const found = token ? invitations.get(token) : undefined;
+    if (!found)
+      return refuse(404, "This invitation link doesn't work any more. Ask for a new one.");
+    if (!password || password.length < 12)
+      return refuse(422, "a password needs at least 12 characters");
+    invitations.delete(token as string);
+    members = members.map((m) => (m.id === found.member.id ? { ...m, status: "active" } : m));
+    setSignedIn(true);
+    // The mock has one signed-in person; the new one is shown by name and role.
+    return HttpResponse.json({ ...me(), name: found.member.email, role: found.member.role });
   }),
 ];

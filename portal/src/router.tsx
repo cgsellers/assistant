@@ -6,6 +6,11 @@ import { AppShell } from "@/layouts/AppShell";
 export const routes = [
   { path: "/sign-in", element: <SignInPage /> },
   {
+    path: "/accept-invite",
+    lazy: () =>
+      import("@/features/auth/AcceptInvitePage").then((m) => ({ Component: m.AcceptInvitePage })),
+  },
+  {
     element: (
       <RequireAuth>
         <AppShell />
