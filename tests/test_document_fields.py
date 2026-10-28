@@ -261,6 +261,21 @@ class TestTheOcrRecordsPageSizes:
         assert result.page_sizes == [{"page": 1, "width": 2480, "height": 3508}]
 
 
+def test_a_problem_reads_as_a_sentence_about_the_document():
+    from doctypes.fields import _problems
+
+    definition = Definition.model_validate(RECEIPT)
+    by_field, _ = _problems(
+        definition,
+        [
+            "total is required but was not extracted",
+            "vendor must say who sold it, and total must be positive",
+        ],
+    )
+    assert by_field["total"] == "Total is required, but wasn't found on the document"
+    assert by_field["vendor"] == "Vendor must say who sold it, and total must be positive"
+
+
 @pytest.mark.parametrize(
     ("name", "shown"),
     [

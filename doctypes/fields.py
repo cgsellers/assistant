@@ -49,6 +49,14 @@ def _required(definition: Definition, name: str, spec: FieldSpec) -> bool:
     )
 
 
+#: The validator's phrasing, said the way a client would: it talks about the
+#: pipeline, the page talks about the document. Kept here rather than in the
+#: validator, whose messages are also read by evals and the team's panel.
+_PLAIN_WORDS = (
+    ("is required but was not extracted", "is required, but wasn't found on the document"),
+)
+
+
 def _problems(definition: Definition, errors: list[str]) -> tuple[dict[str, str], list[str]]:
     """
     Each validation message, at the field it is about, or with the document's
@@ -59,8 +67,19 @@ def _problems(definition: Definition, errors: list[str]) -> tuple[dict[str, str]
     names = sorted(definition.fields, key=len, reverse=True)
     pattern = re.compile(r"\b(" + "|".join(map(re.escape, names)) + r")\b") if names else None
 
+    def named(match: re.Match) -> str:
+        shown = label(match.group(1))
+        # A label starts a sentence with a capital, and is lower case inside
+        # one -- unless it begins with an acronym ("PO number", "IVA").
+        first = shown.split(" ")[0]
+        if match.start() == 0 or first.isupper():
+            return shown
+        return shown[:1].lower() + shown[1:]
+
     def readable(message: str) -> str:
-        text = pattern.sub(lambda m: label(m.group(1)), message) if pattern else message
+        text = pattern.sub(named, message) if pattern else message
+        for said, meant in _PLAIN_WORDS:
+            text = text.replace(said, meant)
         return text[:1].upper() + text[1:]
 
     by_field: dict[str, str] = {}
