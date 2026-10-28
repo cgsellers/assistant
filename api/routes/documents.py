@@ -37,7 +37,7 @@ from api.schemas import (
     ResultOut,
 )
 from core import repository, storage, tenancy
-from core.auth import Principal, require_principal
+from core.auth import Principal, require_principal, require_work
 from core.config import get_settings
 from core.db import get_session
 from doctypes import listing, review
@@ -77,7 +77,7 @@ def check_upload(data: bytes) -> str:
 
 
 def owner(
-    principal: Principal | None = Depends(require_principal),
+    principal: Principal | None = Depends(require_work),
     session: Session = Depends(get_session),
 ) -> str:
     """
@@ -394,6 +394,10 @@ def correct_fields(
     # exactly as a missing one, whatever was sent.
     if document is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No such document")
+    if principal is not None and not principal.may_work:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, "Your role can see documents but not change them."
+        )
     if patch is None:
         return _refused(422, "Send the revision and the values to change.")
     try:

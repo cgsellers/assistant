@@ -39,7 +39,7 @@ from core.models import Organisation, User, UserSession, utcnow
 
 log = logging.getLogger("users")
 
-ROLES = ("author", "admin")
+ROLES = ("author", "admin", "member", "viewer")
 
 #: Length over complexity rules: those push people to "Password1!", and a
 #: long passphrase is both easier to remember and harder to guess.
@@ -78,7 +78,7 @@ def create(
     *,
     organisation_id: str,
     is_staff: bool,
-    role: str = "author",
+    role: str | None = None,
     name: str | None = None,
 ) -> User:
     """
@@ -86,8 +86,6 @@ def create(
     person belongs to, and whether they are staff -- who can see every
     organisation's documents -- are not things to get by accident.
     """
-    if role not in ROLES:
-        raise ValueError(f"role must be one of {ROLES}")
     email = _normalise(email)
     # The columns' limits, checked here so the CLI says so instead of the
     # database failing the insert.
@@ -100,6 +98,7 @@ def create(
     organisation = session.get(Organisation, organisation_id)
     if organisation is None:
         raise ValueError("no such organisation")
+    role = check_role(organisation, role)
     if is_staff and not organisation.is_internal:
         # Staff see every client's documents. Only the team can be that.
         raise ValueError("only members of the Ledgerline team's organisation can be staff")
@@ -110,6 +109,22 @@ def create(
     session.add(user)
     session.commit()
     return user
+
+
+def check_role(organisation: Organisation, role: str | None) -> str:
+    """
+    `role`, if this organisation's people may hold it, or the default: an
+    author on the team, a member at a client. A client has no use for the
+    team's authoring role.
+    """
+    from core.auth import CLIENT_ROLES, TEAM_ROLES
+
+    allowed = TEAM_ROLES if organisation.is_internal else CLIENT_ROLES
+    if role is None:
+        return "author" if organisation.is_internal else "member"
+    if role not in allowed:
+        raise ValueError(f"role must be one of {', '.join(allowed)}")
+    return role
 
 
 def sign_in(session: Session, email: str, password: str) -> SignedIn:
@@ -234,7 +249,10 @@ def main() -> None:
     made = sub.add_parser("create", help="add a user; prompts for the password")
     made.add_argument("email")
     made.add_argument("--name")
-    made.add_argument("--role", choices=ROLES, default="author")
+    made.add_argument(
+        "--role", choices=ROLES, default=None,
+        help="default: author for the team, member for a client",
+    )
     made.add_argument(
         "--client", metavar="SLUG",
         help="a client organisation's user, who sees only its documents; "

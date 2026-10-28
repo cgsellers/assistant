@@ -65,8 +65,14 @@ VISIBLE = len(PREFIX) + 8
 #: The docs are open because this is a project meant to be read; a deployment
 #: that cared would close them.
 PUBLIC_PATHS = frozenset(
-    {"/health", "/ready", "/docs", "/redoc", "/openapi.json", "/auth/login", "/panel/login"}
-)
+    {
+        "/health", "/ready", "/docs", "/redoc", "/openapi.json", "/auth/login", "/panel/login",
+        # An invitation is for someone with no account yet. The token travels
+        # in the body, so these paths stay exact and the token stays out of
+        # every log line.
+        "/auth/invitation", "/auth/invitation/accept",
+    }
+)  # fmt: skip
 
 #: The panel's session cookie. HttpOnly, so page scripts cannot read it.
 SESSION_COOKIE = "ledgerline_session"
@@ -77,8 +83,22 @@ SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
 
 class Role(StrEnum):
+    """
+    Two vocabularies on one column. The team's: an author drafts and tries
+    processors, an admin also puts them live. A client's: a member uploads
+    and corrects, a viewer only looks, an admin also manages the
+    organisation's keys and people. Admin means the most in both.
+    """
+
     AUTHOR = "author"
     ADMIN = "admin"
+    MEMBER = "member"
+    VIEWER = "viewer"
+
+
+#: Who may hold each role: a client has no use for authoring processors.
+CLIENT_ROLES = (Role.ADMIN, Role.MEMBER, Role.VIEWER)
+TEAM_ROLES = (Role.AUTHOR, Role.ADMIN, Role.MEMBER, Role.VIEWER)
 
 
 @dataclass(frozen=True)
@@ -113,6 +133,19 @@ class Principal:
 
     def may(self, role: Role) -> bool:
         return self.role is Role.ADMIN or self.role is role
+
+    @property
+    def may_work(self) -> bool:
+        """Upload and correct documents: everyone but a viewer."""
+        return self.role is not Role.VIEWER
+
+    @property
+    def may_manage(self) -> bool:
+        """
+        An organisation's keys and people: an admin, and a person. Keys end up
+        inside other systems, and must not be able to mint more keys.
+        """
+        return self.role is Role.ADMIN and self.kind in ("user", "local")
 
 
 #: Auth switched off for local work: everything is allowed, and the lifespan
@@ -288,6 +321,34 @@ def require_team(principal: Principal | None = Depends(require_principal)) -> Pr
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="this is for the Ledgerline team",
+        )
+    return principal
+
+
+def require_work(principal: Principal | None = Depends(require_principal)) -> Principal:
+    """Changing documents -- uploading, correcting: refused to a viewer."""
+    if principal is None:
+        raise _refused()
+    if not principal.may_work:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Your role can see documents but not change them.",
+        )
+    return principal
+
+
+def require_manage(principal: Principal | None = Depends(require_principal)) -> Principal:
+    """An organisation's settings -- its keys and its people: an admin, signed in."""
+    if principal is None:
+        raise _refused()
+    if principal.kind == "key":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Settings are for people: sign in to change them.",
+        )
+    if not principal.may_manage:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Only an admin can change this."
         )
     return principal
 
