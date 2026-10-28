@@ -15,6 +15,14 @@ import { formatDay, formatMoment } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useChangeRole, useInvite, useMembers, useRemoveMember } from "./queries";
 
+/** Any role a member can hold: a client's three, and the team's own "author". */
+const LABEL: Record<Member["role"], string> = {
+  admin: "Admin",
+  member: "Member",
+  viewer: "Viewer",
+  author: "Author",
+};
+
 export const ROLE: Record<ClientRole, { label: string; does: string }> = {
   admin: { label: "Admin", does: "Everything a member can, plus API keys and the team." },
   member: { label: "Member", does: "Uploads documents, reviews and corrects them." },
@@ -104,7 +112,7 @@ export function Team({ manage, organisation }: { manage: boolean; organisation: 
                           {
                             onSuccess: (changed) =>
                               toast.success(
-                                `${changed.email} is now ${ROLE[changed.role].label.toLowerCase()}.`,
+                                `${changed.email} is now ${LABEL[changed.role].toLowerCase()}.`,
                               ),
                             onError: (error) => toast.error(error.message),
                           },
@@ -118,7 +126,7 @@ export function Team({ manage, organisation }: { manage: boolean; organisation: 
                       ))}
                     </select>
                   ) : (
-                    <span className="text-sm">{ROLE[member.role].label}</span>
+                    <span className="text-sm">{LABEL[member.role]}</span>
                   )}
                 </TD>
                 <TD className="tabular whitespace-nowrap text-sm">

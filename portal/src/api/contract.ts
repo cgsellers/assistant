@@ -1,20 +1,16 @@
 import type { components } from "@/api/schema";
 
 /**
- * Endpoints the portal needs that the API does not have yet, and the names
- * the screens use for those it has.
- *
- * Written before the backend, on purpose: the mock handlers implement exactly
- * these shapes, the screens are built against them, and then the backend is
- * built to match. When an endpoint lands in the API, its types come from the
- * generated schema instead and its entry here is deleted -- `npm run api`
- * plus the type checker will then point at any disagreement.
+ * The names the screens use for the API's types. It began as the contract for
+ * endpoints the API did not have yet: the mocks implemented these shapes, the
+ * screens were built against them, then the backend was built to match. Every
+ * endpoint is built now, so each name is the generated schema's type, and
+ * `npm run api` plus the type checker point at any disagreement.
  */
 
 // --- Built: the documents list ------------------------------------------------------
 // GET /documents, /summary, /types and /export are in the API. Their types come
-// from its schema (src/api/schema.d.ts); the names stay, so the screens and the
-// contracts still to be built below keep using them.
+// from its schema (src/api/schema.d.ts); the names stay, so the screens keep using them.
 
 type Schemas = components["schemas"];
 
@@ -76,69 +72,27 @@ export type DocumentFields = Schemas["DocumentFieldsOut"];
 export type FieldsPatch = Schemas["FieldsPatchIn"];
 export type FieldsRefused = Schemas["FieldsRefusedOut"];
 
-// --- Still to build ------------------------------------------------------------------
-
-// --- Settings: a client's API keys and team (5.6) -------------------------------------
-// All under /settings, for the signed-in person's own organisation only. Reading
-// needs any role; every change needs "admin" (403 otherwise).
+// --- Built: settings ------------------------------------------------------------------
+// /settings/keys and /settings/members are in the API. For people only: a key is
+// refused. Anyone signed in may read; every change needs an admin (403).
 
 /**
- * What a person at a client may do. Not the team's "author"/"admin", which are
- * about writing processors:
+ * What a person at a client may do. Not the team's "author", which is about
+ * writing processors -- though a member of the team's own organisation may
+ * hold it, which is why a Member's role can be one more than this.
  *   admin   -- everything a member can, plus API keys and the team
  *   member  -- upload, review and correct
  *   viewer  -- see documents and export them; change nothing
  */
 export type ClientRole = "admin" | "member" | "viewer";
 
-/** One live API key. GET /settings/keys lists them; revoked keys are not listed. */
-export interface ApiKeyRow {
-  id: string;
-  name: string;
-  /** The start of the key, "lk_a1B2c3D4": enough to recognise it, not to use it. */
-  prefix: string;
-  created_at: string;
-  /** Who made it, or null for one made by the Ledgerline team. */
-  created_by: string | null;
-  last_used_at: string | null;
-}
-
-/**
- * POST /settings/keys {name} -> the key, with its secret. The only time the
- * secret is ever shown: Ledgerline keeps a hash of it, never the key itself.
- */
-export interface CreatedKey {
-  key: ApiKeyRow;
-  secret: string;
-}
-
-/** DELETE /settings/keys/{id}: revoke it, at once. 204. */
-
-/** One person at the organisation. GET /settings/members. */
-export interface Member {
-  id: string;
-  email: string;
-  role: ClientRole;
-  /** "invited" until they accept and set a password. */
-  status: "active" | "invited";
-  last_seen_at: string | null;
-  /** The person asking. */
-  you: boolean;
-}
-
-/**
- * POST /settings/members {email, role} -> the invitation. Ledgerline does not
- * send email yet, so the answer carries a link for the admin to pass on: it
- * works once, for seven days.
- */
-export interface Invitation {
-  member: Member;
-  invite_url: string;
-  expires_at: string;
-}
-
-/**
- * PATCH /settings/members/{id} {role} -> the member. DELETE -> 204.
- * 409 for anything that would leave the organisation with no admin, and for
- * removing yourself.
- */
+/** One live API key. Revoked keys are not listed. */
+export type ApiKeyRow = Schemas["ApiKeyOut"];
+/** A key, with its secret: the only time the secret is ever shown. */
+export type CreatedKey = Schemas["CreatedKeyOut"];
+/** One person at the organisation, or someone invited. */
+export type Member = Schemas["MemberOut"];
+/** An invitation, as a link for an admin to pass on: Ledgerline does not send email yet. */
+export type Invitation = Schemas["InvitationCreatedOut"];
+/** Whose invitation a link is (POST /auth/invitation). */
+export type InvitationOffer = Schemas["InvitationOut"];
