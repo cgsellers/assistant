@@ -36,10 +36,11 @@ from api.schemas import (
     OcrResultOut,
     ResultOut,
 )
-from core import repository, storage, tenancy
+from core import repository, spend, storage, tenancy
 from core.auth import Principal, require_principal, require_work
 from core.config import get_settings
 from core.db import get_session
+from core.models import utcnow
 from doctypes import listing, review
 from doctypes.fields import document_fields
 from doctypes.results import document_result
@@ -93,6 +94,16 @@ def _ingest(
     session: Session, organisation_id: str, data: bytes, filename: str | None
 ) -> DocumentOut:
     mime = check_upload(data)
+    # Past today's spending limit, only a file already here may be "uploaded":
+    # it costs nothing. Anything new would need reading.
+    if spend.over_cap(session) and repository.find_by_sha256(
+        session, organisation_id, storage.sha256_hex(data)
+    ) is None:
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            "Ledgerline has reached today's limit for reading documents. Try again tomorrow.",
+            headers={"Retry-After": str(int((spend.tomorrow() - utcnow()).total_seconds()))},
+        )
     document, created = repository.ingest(
         session, organisation_id=organisation_id, data=data, mime_type=mime,
         original_filename=filename,

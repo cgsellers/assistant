@@ -24,7 +24,7 @@ from functools import lru_cache
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from core import money, repository, storage
+from core import money, repository, spend, storage
 from core.db import SessionLocal
 from core.models import Document, Job, OcrResult, utcnow
 from core.scoping import Scope, set_scope
@@ -294,6 +294,19 @@ def run_extract_job(session: Session, job: Job, extractor: Extractor) -> None:
         },
     )
     session.commit()
+
+    if spend.over_cap(session):
+        # Not a failure: the call is put off, not lost, and the attempt the
+        # claim counted is handed back.
+        job.status = JobStatus.QUEUED
+        job.locked_by = None
+        job.locked_at = None
+        job.attempts = max(0, job.attempts - 1)
+        job.run_after = spend.tomorrow()
+        job.last_error = "waiting: today's spending limit is reached"
+        session.commit()
+        log.warning("extract deferred document=%s: daily spend cap reached", document.id[:8])
+        return
 
     schema = build_json_schema(definition, match.profile)
     try:

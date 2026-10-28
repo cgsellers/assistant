@@ -1,6 +1,8 @@
+from decimal import Decimal
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -43,6 +45,10 @@ class Settings(BaseSettings):
     portal_url: str = "http://localhost:5173"
     # How long an invitation link works.
     invitation_days: int = 7
+    # The most to spend on model calls in a day (UTC), across every
+    # organisation; none when unset. Past it, new uploads are refused and
+    # queued documents wait for the next day (core/spend.py).
+    max_daily_spend_usd: Decimal | None = None
 
     database_url: str = "sqlite:///./data/ledgerline.db"
     storage_dir: Path = Path("./data/files")
@@ -67,6 +73,12 @@ class Settings(BaseSettings):
         "application/pdf",
     )
 
+
+    @field_validator("max_daily_spend_usd", mode="before")
+    @classmethod
+    def _blank_is_no_cap(cls, value):
+        """Compose passes `${MAX_DAILY_SPEND_USD:-}` through as "" when unset: no cap."""
+        return None if isinstance(value, str) and not value.strip() else value
 
 @lru_cache
 def get_settings() -> Settings:
