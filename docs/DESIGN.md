@@ -1604,6 +1604,32 @@ kept in brackets, so earlier sections that say "phase 6" still point somewhere.
 tree (the YAML editor stands in); a code editor in the panel instead of text areas; and
 scoring a draft against the eval corpus before publishing it (`evals.run --version`).
 
+**Next, with step 7 (decided 2026-10-28): API access as a paid plan.** The portal is the
+base product; machine access, a client's ERP sending documents with a key, is the
+premium tier.
+- **An entitlement, not a payment flag.** Each organisation has "API access", on or off,
+  with who granted it and when. Payment is only one way it gets switched on: until there
+  is billing, the team toggles it in the panel, and later a Stripe webhook flips the
+  same switch (paid turns it on, cancelled turns it off).
+- **Gated in three places, because hiding a button is not a paywall:**
+  - the portal: without access, Settings shows the API keys section *locked*, saying
+    API access is available on the API plan, with a way to ask for it;
+  - making a key: refused by the server (403) without access;
+  - using a key: every key-authenticated request checks that its organisation still
+    has access, so a key made during one paid month does not work forever.
+- **When access ends, keys keep working for a grace period of 7 days**, so a failed
+  card payment does not break a client's integration overnight. After that they are
+  refused, with an answer that says why. They are not revoked: when access returns, so
+  do they.
+- **Existing keys are grandfathered:** every organisation with a live key when this
+  ships gets access, recorded as granted by the migration. Nothing that works today
+  breaks; every other organisation starts without.
+- People using the portal, uploads included, are unaffected, and the team's own
+  organisation always has access.
+- **Later, with pricing:** a monthly document allowance per organisation. Every document
+  costs a model call however it arrives, and an ERP can send thousands, so a flat fee
+  for unlimited use could lose money. This is the per-client version of the daily cap.
+
 **Backlog** (decided 2026-10-27, not yet scheduled):
 - **Done (§9.5):** file storage per organisation. Still to come, with hosting: the S3
   backend behind the same `save()`/`load()`.
