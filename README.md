@@ -491,20 +491,46 @@ has checked each field against the document and said otherwise.
 
 ### Everything in containers
 
-The deployment shape, on one machine:
+The whole product on one machine, shaped the way a deployment is:
 
 ```bash
 docker compose --profile app up -d --build
-docker compose --profile app run --rm api python -m core.auth create "me" --role admin
-docker compose --profile app run --rm api python -m core.users create you@example.com --role admin
-# the API and panel on http://localhost:8080; readiness at /ready
+docker compose --profile app run --rm api python -m demo.seed
 ```
 
-A one-off `migrate` service runs the migrations and creates the starter processors, and
-the API and worker start only once it has succeeded, from the same image. The worker
-also waits for the schema itself, so a worker started early never runs against an old
-one. The OCR container sits on a Docker network with no route out: it can reach neither
-the internet nor the database, which the full stack was checked for. `/health` is
-liveness; `/ready` answers 503 until the database is at the migration the code expects.
+Then open **http://localhost:8080** and sign in as `admin@acme.example`,
+`member@acme.example` or `viewer@acme.example`, password `acme demo passphrase`.
+That's Acme Demo Ltd, a client with 28 synthetic invoices and receipts:
+- most are ready and in the ledger;
+- a few are held for review: a cut-off invoice, a credit note, a torn receipt, and an
+  Italian receipt waiting to be approved;
+- one is a delivery note nobody can read.
+
+The seed costs nothing. The documents are generated, so the model's answers are known;
+everything else (OCR, routing, transform, rules, ledger) runs for real.
+`python -m demo.seed --replace` starts it over, which is safe with the worker running.
+
+Everything answers on one origin, through Caddy (`deploy/Caddyfile`):
+- the client portal at `/`;
+- the API under `/api`, with its readiness check at `/api/ready`;
+- the team's panel under `/panel`.
+
+For the team's own accounts:
+
+```bash
+docker compose --profile app run --rm api python -m core.auth create "me" --role admin
+docker compose --profile app run --rm api python -m core.users create you@example.com --role admin
+```
+
+How the stack starts up, and what it guards:
+- A one-off `migrate` service runs the migrations and creates the starter processors.
+  The API and worker start only once it has succeeded, from the same image, and the
+  worker also waits for the schema itself.
+- The OCR container sits on a Docker network with no route out: it can reach neither
+  the internet nor the database. No container runs as root.
+- `MAX_DAILY_SPEND_USD` in `.env` caps what the model may cost in a day. Past it, new
+  uploads are refused until midnight UTC.
+- `/health` is liveness. `/ready` answers 503 until the database is at the migration
+  the code expects.
 
 ---

@@ -1593,7 +1593,7 @@ kept in brackets, so earlier sections that say "phase 6" still point somewhere.
 | Step | Ships | Done when | Demonstrates |
 |---|---|---|---|
 | **5** | Client portal: each client's staff see only their documents and results, upload, download, and manage their ERP's API key | A client signs in and sees only their own | The product's outside |
-| 6 | Hosted demo on synthetic data (moved out of step 2) | A public URL | Production shape |
+| 6 | Hosted demo on synthetic data (moved out of step 2). The local half is done (§9.5); the hosting half waits for a decision on whether and where | A public URL | Production shape |
 | 7 (phase 4) | Review queue and corrections; corrections become eval labels; probable-duplicate detection (§8.6); reprocessing after a publish | No document sits in review without a way to fix it | Human in the loop; labels from use |
 | 8 (phase 4) | A model classifier when no keyword matches; vision fallback for photos that fail their rules; each tier measured | A table of share, accuracy and cost per tier | Cost engineering |
 | 9 (phases 5, 6b) | A template agent that drafts processors through the authoring API, scored on a fresh holdout. LangGraph only if the draft → trial → revise loop needs it | An agent-drafted processor reaches a stated accuracy on unseen layouts and is published after review | Agents, measured; orchestration where justified |
@@ -1605,6 +1605,8 @@ tree (the YAML editor stands in); a code editor in the panel instead of text are
 scoring a draft against the eval corpus before publishing it (`evals.run --version`).
 
 **Backlog** (decided 2026-10-27, not yet scheduled):
+- **Done (§9.5):** file storage per organisation. Still to come, with hosting: the S3
+  backend behind the same `save()`/`load()`.
 - **File storage per organisation.** Keys become `raw/{organisation}/ab/abcdef…`, not
   `raw/ab/abcdef…`. Today identical bytes uploaded by two clients share one file. That
   is not a leak, since every read goes through the client's own document row under RLS,
@@ -2366,6 +2368,66 @@ types. Mock mode stays, for demos and for building screens ahead of their endpoi
     Upload.
 
   No page errors, no server errors. The copy was then deleted.
+
+### 9.5 Step 6, locally: the production shape without a server
+
+Decided 2026-10-28: keep it on this machine until it is clear whether Ledgerline
+becomes a public demo, and spend nothing until then. Everything that does not depend on
+where it is hosted is built; what does (a server, a domain, certificates, an object
+store) waits.
+
+- **One command for the whole product.** `docker compose --profile app up` now includes
+  `web`: the portal's production build, served by Caddy, which also proxies `/api` and
+  `/panel` to the API. That is the single-origin layout the dev server imitates, so the
+  session cookie and CSRF work as in development, with no CORS. The API is no longer
+  published separately.
+  - The portal gets a strict Content-Security-Policy: scripts only from itself, no
+    eval. PDF.js and its worker were checked under it in WebKit, with no refusals.
+  - It also sends `Referrer-Policy: no-referrer`, so an invitation token can't leak.
+  - Hashed assets are cached for a year; pages are always rechecked.
+- **Like the other images, the web image never runs as root.** It listens on 8080
+  inside the container. The official Caddy binary carries the capability to bind low
+  ports, and a container with every capability dropped refuses to run a binary that
+  asks for one, so the image strips it. Going online means a domain in `SITE_ADDRESS`,
+  after which Caddy fetches its own certificates; serving 80/443 is decided then. CI
+  builds the web image and checks it is valid, not root, and free of secrets.
+- **A demo client, Acme Demo Ltd, for nothing** (`demo/`). Twenty-eight synthetic
+  invoices and receipts go through the real pipeline: ingestion, OCR from their text
+  layers, routing, transform, rules, ledger, list columns and history. Since the
+  documents are generated, the model's answer for each is known, and an extractor that
+  answers with it stands in, costing nothing.
+  - Each supplier prints in its own country's style, and the documents cover the
+    awkward cases: an untotalled invoice, a cut-off one, a credit note, a torn receipt,
+    an IVA base that doesn't add up, and an Italian tax ID the Spanish rule refuses.
+  - The demo looks used: dated over the last month, one receipt corrected by its
+    member, one approved by its admin, and one Italian receipt left for a visitor to
+    approve.
+  - `--replace` wipes and reseeds, which is what a public demo would run nightly; with
+    a folder per organisation, its files are a single folder.
+- **The seed never lets the real worker near its documents.** A first version took the
+  next queued job, and a test caught it reading another organisation's document. Had
+  the worker been running, it could equally have taken a demo document and sent it to
+  Claude, a paid call. Now the seed's session marks every job it creates as already
+  its own, at the moment the job is written, so none is ever queued. A test polls the
+  queue after every upload, as a running worker would, and finds nothing.
+- **Per-organisation file storage** (the backlog item). Keys are
+  `raw/{organisation}/ab/abcdef…`, and the organisation id is checked before it becomes
+  a path. Two clients sending identical bytes now get a copy each. Documents stored
+  earlier keep their keys and still load.
+- **A daily spend cap**, `MAX_DAILY_SPEND_USD`, across every organisation. It's counted
+  in a session of its own that sees them all, since a client's request sees only its
+  own.
+  - Past the cap, a new upload is refused with 429 and `Retry-After`; a file already in
+    Ledgerline still answers, since it costs nothing.
+  - The worker defers queued reading to the next UTC day and gives back the attempt the
+    claim counted.
+  - Getting "unset" right took two tries. Making *every* empty variable mean unset broke
+    two tests that blank the API key, because the real key in `.env` came back. Only
+    the cap now reads an empty value as "no cap".
+- **Checked as a whole.** The stack was built and started, the demo seeded inside it, then
+  reset with `--replace` while the worker ran. A WebKit browser that lacks stream
+  iteration, as Safari 26 does, signed in as the demo admin, opened an invoice's PDF
+  with its highlight under the CSP, and approved the Italian receipt.
 
 ### 9.2 Why Postgres
 
