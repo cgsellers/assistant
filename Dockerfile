@@ -38,6 +38,7 @@ COPY alembic ./alembic
 COPY analyst ./analyst
 COPY api ./api
 COPY core ./core
+COPY demo ./demo
 COPY doctypes ./doctypes
 COPY llm ./llm
 COPY ocr ./ocr
