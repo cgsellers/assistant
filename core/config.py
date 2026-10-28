@@ -37,6 +37,12 @@ class Settings(BaseSettings):
     # Secure cookies are only sent over HTTPS. On by default; turn it off in
     # .env only for plain-http local work in a browser that insists.
     session_cookie_secure: bool = True
+    # Where the client portal is, for the links in invitations. Configured
+    # rather than read off the request: Host and Origin are whatever the
+    # caller sends, and a link built from them can be pointed at anyone.
+    portal_url: str = "http://localhost:5173"
+    # How long an invitation link works.
+    invitation_days: int = 7
 
     database_url: str = "sqlite:///./data/ledgerline.db"
     storage_dir: Path = Path("./data/files")

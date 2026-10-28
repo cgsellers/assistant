@@ -638,6 +638,9 @@ class ApiKey(Base):
     #: "author" or "admin" -- see core.auth.Role. Machines draft and try
     #: processors; putting one live takes an admin key or an admin person.
     role: Mapped[str] = mapped_column(String(10), default="author", server_default="author")
+    #: Who made it, when someone did through the portal's settings; null for
+    #: keys made by the Ledgerline team on the command line.
+    created_by: Mapped[str | None] = mapped_column(String(254))
 
 
 class User(Base):
@@ -677,6 +680,31 @@ class User(Base):
     #: Disabling rather than deleting, for the same reason keys are revoked:
     #: `created_by` on processor versions still has to mean someone.
     disabled_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+
+
+class Invitation(Base):
+    """
+    An offer to join an organisation, made by one of its admins. Accepted
+    once, by whoever holds the link, before it expires; the link's token is
+    kept only as a hash, like a key's. Not client data in the RLS sense: it
+    is looked up by token before anyone is signed in, so every query names
+    the organisation itself (api/routes/settings.py).
+    """
+
+    __tablename__ = "invitations"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    organisation_id: Mapped[str] = mapped_column(ForeignKey("organisations.id"), index=True)
+    #: Lowercased, as users' are.
+    email: Mapped[str] = mapped_column(String(254), index=True)
+    role: Mapped[str] = mapped_column(String(10))
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    created_by: Mapped[str] = mapped_column(String(254))
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(UTCDateTime)
+    accepted_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    #: Withdrawn by an admin, or replaced by a newer invitation to the same person.
+    revoked_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
 
 
 class UserSession(Base):
